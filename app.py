@@ -1,65 +1,45 @@
 import asyncio
 import logging
 import os
+import sqlite3
 import threading
+from datetime import date, timedelta
+from typing import Dict, List, Optional
+
 import uvicorn
-from os import getenv
-from dotenv import load_dotenv
-
-# --- Импорты для Вебхука и Веб-сервера ---
-from aiohttp import web
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
-# --- Импорты для FastAPI (бэкенд) ---
+from aiohttp import web
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-# (импорты pydantic и другие для API)
 from pydantic import BaseModel
-from typing import Dict, List, Optional
-from datetime import date, timedelta
-import sqlite3
 
-# --- Импорты для нашего бота "Страж Режима" ---
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 import bot.db as db
 from bot.handlers import router as regime_handlers_router
 from bot.scheduler import setup_scheduler
 
 # --- 1. НАСТРОЙКА И КОНФИГУРАЦИЯ ---
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-# Переменные окружения для Render
-BOT_TOKEN = getenv("BOT_TOKEN")
-# Адрес нашего фронтенда на Vercel
-FRONTEND_URL = getenv("FRONTEND_URL")
-# Адрес, который Render выдаст для этого сервиса
-RENDER_URL = getenv("RENDER_URL")
-
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+RENDER_URL = os.getenv("RENDER_URL")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{RENDER_URL}{WEBHOOK_PATH}"
-
-# Порт, который будет слушать Render
-WEBAPP_PORT = int(getenv("PORT", 10000))
+WEBAPP_PORT = int(os.getenv("PORT", 10000))
 
 # --- 2. ИНИЦИАЛИЗАЦИЯ БОТА И ДИСПЕТЧЕРА ---
-
-# Наш бот "Страж Режима"
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-# Подключаем все наши хэндлеры из папки /bot
 dp.include_router(regime_handlers_router)
 
 # --- 3. ЛОГИКА FastAPI БЭКЕНДА ---
-
-# Создаем экземпляр FastAPI
 fastapi_app = FastAPI()
-
-# Настраиваем CORS, чтобы фронтенд мог делать запросы
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL, "http://localhost:3000"],
@@ -68,8 +48,7 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Вставляем сюда все Pydantic модели и эндпоинты из вашего webapp/backend/main.py ---
-
+# --- ВАШИ Pydantic МОДЕЛИ И ЛОГИКА API ---
 class HistoryDayStats(BaseModel):
     date: str
     screen_time_goal: int
@@ -85,18 +64,12 @@ class TodayStats(BaseModel):
     screen_time_goal: Optional[int] = 0
     screen_time_actual: int = 0
     screen_time_breakdown: Dict[str, int] = {}
-    workout_planned: int = 0
-    workout_done: int = 0
-    english_planned: int = 0
-    english_done: int = 0
-    coding_planned: int = 0
-    coding_done: int = 0
-    planning_planned: int = 0
-    planning_done: int = 0
-    stretching_planned: int = 0
-    stretching_done: int = 0
-    reflection_planned: int = 0
-    reflection_done: int = 0
+    workout_planned: int; workout_done: int
+    english_planned: int; english_done: int
+    coding_planned: int; coding_done: int
+    planning_planned: int; planning_done: int
+    stretching_planned: int; stretching_done: int
+    reflection_planned: int; reflection_done: int
 
 class UserStatsResponse(BaseModel):
     user_id: int
@@ -104,81 +77,80 @@ class UserStatsResponse(BaseModel):
     history: List[HistoryDayStats]
 
 def get_db_connection():
-    # На Render база данных будет создана в корневом каталоге проекта
     conn = sqlite3.connect('./database.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 @fastapi_app.get("/api/stats/{user_id}", response_model=UserStatsResponse)
 def read_user_stats(user_id: int):
-    # (Здесь вся ваша рабочая логика для эндпоинта, я не буду ее повторять, но она должна быть здесь)
+    # (Здесь ваша полная рабочая логика для эндпоинта)
+    # Я вставлю её для полноты
     conn = get_db_connection()
     try:
-        # ... вся ваша логика получения today и history ...
-        # Пример заглушки, замените на ваш код
         today_iso = date.today().isoformat()
         today_main_stats = conn.execute("SELECT * FROM daily_stats WHERE user_id = ? AND stat_date = ?", (user_id, today_iso)).fetchone()
-        if not today_main_stats: raise HTTPException(404)
-        today_data = TodayStats(**today_main_stats) # Упрощенно
-        history_data = [] # Упрощенно
+        if not today_main_stats: raise HTTPException(status_code=404, detail="План на сегодня не найден.")
+        
+        today_activities = conn.execute("SELECT activity_name, duration_minutes FROM screen_activities WHERE user_id = ? AND activity_date = ?", (user_id, today_iso)).fetchall()
+        breakdown = {row['activity_name']: row['duration_minutes'] for row in today_activities}
+        total_minutes_today = sum(breakdown.values())
+
+        today_data = TodayStats(**dict(today_main_stats), screen_time_actual=total_minutes_today, screen_time_breakdown=breakdown)
+
+        history_data = []
+        seven_days_ago = date.today() - timedelta(days=7)
+        history_main_stats = conn.execute("SELECT * FROM daily_stats WHERE user_id = ? AND stat_date >= ? AND stat_date < ? ORDER BY stat_date DESC", (user_id, seven_days_ago.isoformat(), today_iso)).fetchall()
+        history_screen_time = conn.execute("SELECT activity_date, SUM(duration_minutes) as total_minutes FROM screen_activities WHERE user_id = ? AND activity_date >= ? AND activity_date < ? GROUP BY activity_date", (user_id, seven_days_ago.isoformat(), today_iso)).fetchall()
+        screen_time_map = {row['activity_date']: row['total_minutes'] for row in history_screen_time}
+
+        for day_stats in history_main_stats:
+            history_data.append(HistoryDayStats(**dict(day_stats), screen_time_actual=screen_time_map.get(day_stats['stat_date'], 0)))
+        
         return UserStatsResponse(user_id=user_id, today=today_data, history=history_data)
     finally:
         conn.close()
 
-# --- 4. НАСТРОЙКА И ЗАПУСК ВЕБ-СЕРВЕРА AIOHTTP (ДЛЯ ВЕБХУКА) ---
 
-async def on_startup(bot: Bot):
-    """Действия при старте: инициализация БД, установка вебхука, запуск планировщика."""
+# --- 4. НАСТРОЙКА И ЗАПУСК ВЕБ-СЕРВЕРА AIOHTTP (ДЛЯ ВЕБХУКА) ---
+async def on_startup(bot_instance: Bot):
     logger.info("Initializing database...")
     db.init_db()
-
-    # ВАЖНО: Передаем реальный URL фронтенда в хэндлеры
     import bot.handlers
     bot.handlers.WEBAPP_URL = FRONTEND_URL
-
     logger.info(f"Setting webhook to {WEBHOOK_URL}")
-    await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
-
+    await bot_instance.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
     logger.info("Starting scheduler...")
-    setup_scheduler(bot)
-    logger.info("Bot and scheduler are running.")
+    setup_scheduler(bot_instance)
 
-async def on_shutdown(bot: Bot):
-    """Действия при остановке: удаление вебхука."""
+async def on_shutdown(bot_instance: Bot):
     logger.warning("Shutting down..")
-    await bot.delete_webhook()
-    logger.warning("Bot webhook deleted. Bye!")
+    await bot_instance.delete_webhook()
 
-# Создаем веб-приложение aiohttp
-aiohttp_app = web.Application()
+# Оборачиваем FastAPI в WSGI-приложение, чтобы его мог запустить Gunicorn
+def run_fastapi():
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=WEBAPP_PORT)
 
-# Регистрируем обработчик для вебхука Telegram
-webhook_request_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-webhook_request_handler.register(aiohttp_app, path=WEBHOOK_PATH)
+# Запускаем FastAPI в отдельном потоке
+fastapi_thread = threading.Thread(target=run_fastapi)
+fastapi_thread.daemon = True
+fastapi_thread.start()
 
-# Встраиваем FastAPI приложение как под-приложение в aiohttp
-# Это позволит FastAPI обрабатывать свои маршруты (например, /api/stats/...)
-# Внимание: uvicorn и gunicorn нужны для запуска этого под-приложения
-from fastapi.middleware.wsgi import WSGIMiddleware
-aiohttp_app.add_subapp("/api/", WSGIMiddleware(fastapi_app))
-
-# Добавляем маршрут /ping для мониторинга
-async def handle_ping(request):
-    return web.Response(text="Pong")
-
-aiohttp_app.add_routes([web.get('/ping', handle_ping)])
-
-# Передаем действия при старте и остановке в диспетчер
-dp.startup.register(on_startup)
-dp.shutdown.register(on_shutdown)
-
-# --- 5. ГЛАВНАЯ ФУНКЦИЯ ЗАПУСКА ---
-
+# Запускаем основного бота с вебхуком
 def main():
-    """Точка входа. Запускает веб-сервер aiohttp."""
-    logger.info("Starting web server...")
-    setup_application(aiohttp_app, dp, bot=bot)
-    web.run_app(aiohttp_app, host="0.0.0.0", port=WEBAPP_PORT)
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    app = web.Application()
+    webhook_request_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_request_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+    # Отдельный маршрут для пинга
+    async def handle_ping(request):
+        return web.Response(text="Pong")
+    app.add_routes([web.get('/ping', handle_ping)])
+    
+    logger.info("Starting aiohttp server for webhook...")
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv("AIOHTTP_PORT", 8080)))
 
-if __name__ == "__main__":
-    main()
+# Этот код больше не нужен, так как FastAPI запускается в потоке
+# if __name__ == "__main__":
+#     main()
