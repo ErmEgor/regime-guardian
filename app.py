@@ -131,7 +131,7 @@ async def on_shutdown():
     logger.warning("FastAPI shutdown: Deleting webhook...")
     await bot_instance.delete_webhook()
 
-# Главный обработчик вебхука
+# Главный обработчик вебхукаs
 @fastapi_app.post(WEBHOOK_PATH)
 async def bot_webhook(update: dict):
     """Принимает апдейты от Telegram и передает их в диспетчер aiogram."""
