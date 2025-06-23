@@ -1,0 +1,133 @@
+import os
+import logging
+from contextlib import contextmanager
+from datetime import date
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL not set")
+
+engine = create_engine(DATABASE_URL, pool_size=5, max_overflow=10, pool_timeout=30)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+@contextmanager
+def get_db():
+    db_session = SessionLocal()
+    try:
+        yield db_session
+    except OperationalError as e:
+        logging.error(f"Database error: {e}")
+        db_session.rollback()
+    finally:
+        db_session.close()
+
+def init_db():
+    # Пустая функция, таблицы создаются в Supabase SQL Editor
+    pass
+
+def add_user(user_id: int, username: str, first_name: str):
+    with get_db() as db:
+        stmt = text("""
+            INSERT INTO users (user_id, username, first_name)
+            VALUES (:uid, :uname, :fname)
+            ON CONFLICT (user_id) DO NOTHING
+        """)
+        db.execute(stmt, {'uid': user_id, 'uname': username or 'unknown', 'fname': first_name})
+        db.commit()
+
+def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int):
+    with get_db() as db:
+        values = {
+            'user_id': user_id, 'stat_date': date.today(), 'screen_time_goal': screen_time,
+            'workout_planned': workout, 'english_planned': english, 'coding_planned': coding,
+            'planning_planned': planning, 'stretching_planned': stretching, 'reflection_planned': reflection
+        }
+        stmt = text("""
+            INSERT INTO daily_stats (
+                user_id, stat_date, screen_time_goal,
+                workout_planned, workout_done,
+                english_planned, english_done,
+                coding_planned, coding_done,
+                planning_planned, planning_done,
+                stretching_planned, stretching_done,
+                reflection_planned, reflection_done
+            )
+            VALUES (
+                :user_id, :stat_date, :screen_time_goal,
+                :workout_planned, 0,
+                :english_planned, 0,
+                :coding_planned, 0,
+                :planning_planned, 0,
+                :stretching_planned, 0,
+                :reflection_planned, 0
+            )
+            ON CONFLICT (user_id, stat_date) DO UPDATE SET
+                screen_time_goal = :screen_time_goal,
+                workout_planned = :workout_planned,
+                english_planned = :english_planned,
+                coding_planned = :coding_planned,
+                planning_planned = :planning_planned,
+                stretching_planned = :stretching_planned,
+                reflection_planned = :reflection_planned
+        """)
+        db.execute(stmt, values)
+        db.commit()
+
+def mark_activity_done(user_id: int, activity_type: str):
+    with get_db() as db:
+        # Создаём запись, если её нет
+        stmt = text("""
+            INSERT INTO daily_stats (
+                user_id, stat_date, screen_time_goal,
+                workout_planned, workout_done,
+                english_planned, english_done,
+                coding_planned, coding_done,
+                planning_planned, planning_done,
+                stretching_planned, stretching_done,
+                reflection_planned, reflection_done
+            )
+            VALUES (:uid, :today, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            ON CONFLICT DO NOTHING
+        """)
+        db.execute(stmt, {'uid': user_id, 'today': date.today()})
+        
+        column_name = f"{activity_type}_done"
+        stmt = text(f"UPDATE daily_stats SET {column_name} = 1 WHERE user_id = :uid AND stat_date = :today")
+        db.execute(stmt, {'uid': user_id, 'today': date.today()})
+        db.commit()
+
+def get_today_stats_for_user(user_id: int):
+    with get_db() as db:
+        stmt = text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date = :today")
+        result = db.execute(stmt, {'uid': user_id, 'today': date.today()}).first()
+        return result._asdict() if result else None
+
+def get_today_screen_time(user_id: int):
+    with get_db() as db:
+        stmt = text("SELECT SUM(duration_minutes) as total FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
+        result = db.execute(stmt, {'uid': user_id, 'today': date.today()}).scalar_one_or_none()
+        return result or 0
+
+def log_custom_activity(user_id: int, activity_name: str, duration_minutes: int):
+    with get_db() as db:
+        stmt = text("""
+            INSERT INTO screen_activities (user_id, activity_date, activity_name, duration_minutes)
+            VALUES (:uid, :date, :name, :duration)
+        """)
+        db.execute(stmt, {'uid': user_id, 'date': date.today(), 'name': activity_name, 'duration': duration_minutes})
+        db.commit()
+
+def clear_user_data(user_id: int):
+    with get_db() as db:
+        db.execute(text("DELETE FROM screen_activities WHERE user_id = :uid"), {'uid': user_id})
+        db.execute(text("DELETE FROM daily_stats WHERE user_id = :uid"), {'uid': user_id})
+        db.execute(text("DELETE FROM achievements WHERE user_id = :uid"), {'uid': user_id})
+        db.execute(text("DELETE FROM users WHERE user_id = :uid"), {'uid': user_id})
+        db.commit()

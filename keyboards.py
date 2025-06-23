@@ -1,25 +1,15 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# ОБНОВЛЕННАЯ ФУНКЦИЯ с использованием InlineKeyboardBuilder
 def get_main_menu_keyboard(include_settings: bool = False):
-    # 1. Создаем экземпляр строителя
     builder = InlineKeyboardBuilder()
-    
-    # 2. Добавляем кнопки методом .button()
     builder.button(text="✅ Отметить выполнение", callback_data="menu_mark_done")
     builder.button(text="✍️ Записать активность", callback_data="menu_log_activity")
     builder.button(text="📊 Статистика", callback_data="menu_stats")
     builder.button(text="🗑️ Очистить данные", callback_data="menu_clear_stats")
-    
     if include_settings:
         builder.button(text="⚙️ Настройки", callback_data="menu_settings")
-
-    # 3. Указываем, сколько кнопок должно быть в каждом ряду.
-    #    В данном случае - по одной кнопке в ряду.
     builder.adjust(1)
-    
-    # 4. Возвращаем готовую клавиатуру методом .as_markup()
     return builder.as_markup()
 
 def get_mark_done_keyboard():
@@ -76,34 +66,19 @@ def get_stats_keyboard(webapp_url: str):
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# НОВАЯ ФУНКЦИЯ: Клавиатура выбора часового пояса
 def get_timezone_keyboard():
     buttons = [
-        [
-            InlineKeyboardButton(text="UTC+2", callback_data="tz_set_Europe/Kaliningrad"),
-            InlineKeyboardButton(text="UTC+3", callback_data="tz_set_Europe/Moscow"),
-        ],
-        [
-            InlineKeyboardButton(text="UTC+4", callback_data="tz_set_Europe/Samara"),
-            InlineKeyboardButton(text="UTC+5", callback_data="tz_set_Asia/Almaty"),
-        ],
-        [
-            InlineKeyboardButton(text="UTC+6", callback_data="tz_set_Asia/Omsk"),
-            InlineKeyboardButton(text="UTC+7", callback_data="tz_set_Asia/Krasnoyarsk"),
-        ],
-        # Названия в callback_data остаются прежними, они нужны для библиотеки pytz
+        [InlineKeyboardButton(text="Asia/Almaty (UTC+5)", callback_data="tz_set_Asia/Almaty")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# НОВАЯ ФУНКЦИЯ: Меню настроек
 def get_settings_keyboard(current_tz: str):
     buttons = [
-        [InlineKeyboardButton(text=f"Изменить пояс (тек: {current_tz})", callback_data="settings_change_tz")],
+        [InlineKeyboardButton(text=f"Текущий пояс: {current_tz}", callback_data="inactive")],
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# НОВАЯ ФУНКЦИЯ: Клавиатура для отмены FSM
 def get_cancel_keyboard():
     buttons = [
         [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
