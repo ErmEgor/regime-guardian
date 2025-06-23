@@ -1,7 +1,11 @@
 import os
+import sys
 import logging
 from datetime import date, timedelta
 from typing import Dict, List, Optional
+
+# Временный обход для импорта keyboards
+sys.path.append(os.path.dirname(__file__))
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
@@ -334,7 +338,7 @@ async def log_requests(request: Request, call_next):
 @fastapi_app.on_event("startup")
 async def on_startup():
     logger.info(f"Setting webhook to {WEBHOOK_URL}")
-    await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True, max_connections=40, timeout=60)
+    await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True, max_connections=40)
     db.init_db()
 
 @fastapi_app.on_event("shutdown")
