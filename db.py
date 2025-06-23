@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -111,7 +110,7 @@ def get_today_stats_for_user(user_id: int):
 
 def get_today_screen_time(user_id: int):
     with get_db() as db:
-        stmt = text("SELECT SUM(duration_minutes) as total FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
+        stmt = text("SELECT SUM(duration_minutes) FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
         result = db.execute(stmt, {'uid': user_id, 'today': date.today()}).scalar_one_or_none()
         return result or 0
 
