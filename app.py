@@ -125,7 +125,7 @@ async def on_shutdown():
     logger.warning("FastAPI shutdown: Deleting webhook...")
     await bot_instance.delete_webhook()
 
-# ИСПРАВЛЕНИЕ: Используем путь напрямую в декораторе для надежности
+# ИСПРАВЛЕНИЕ: Используем путь напрямую в декораторе для надежности!
 @fastapi_app.post(f"/webhook/{BOT_TOKEN}")
 async def bot_webhook(update: dict):
     """Принимает апдейты от Telegram и передает их в диспетчер aiogram."""
