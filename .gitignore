@@ -8,6 +8,8 @@ venv/
 *.db
 *.db-journal
 
+webapp
+
 # Файлы IDE
 .idea/
 .vscode/

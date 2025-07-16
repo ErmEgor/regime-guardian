@@ -1,5 +1,12 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from datetime import date
+from sqlalchemy import text
+from db import get_db
+import logging
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 def get_main_menu_keyboard(include_settings: bool = False):
     builder = InlineKeyboardBuilder()
@@ -7,33 +14,64 @@ def get_main_menu_keyboard(include_settings: bool = False):
     builder.button(text="✍️ Записать активность", callback_data="menu_log_activity")
     builder.button(text="📊 Статистика", callback_data="menu_stats")
     builder.button(text="🗑️ Очистить данные", callback_data="menu_clear_stats")
+    builder.button(text="🏆 Достижения", callback_data="menu_achievements")
     if include_settings:
         builder.button(text="⚙️ Настройки", callback_data="menu_settings")
     builder.adjust(1)
     return builder.as_markup()
 
-def get_mark_done_keyboard():
+def get_log_activity_type_keyboard():
     buttons = [
-        [
-            InlineKeyboardButton(text="⚔️ Тренировка", callback_data="done_workout"),
-            InlineKeyboardButton(text="🧘 Растяжка", callback_data="done_stretching")
-        ],
-        [
-            InlineKeyboardButton(text="🎓 Английский", callback_data="done_english"),
-            InlineKeyboardButton(text="🤔 Размышления", callback_data="done_reflection")
-        ],
-        [
-            InlineKeyboardButton(text="💻 Кодинг", callback_data="done_coding"),
-            InlineKeyboardButton(text="📝 План", callback_data="done_planning")
-        ],
+        [InlineKeyboardButton(text="📱 Не полезная", callback_data="log_type_screen")],
+        [InlineKeyboardButton(text="💡 Полезная", callback_data="log_type_productive")],
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_mark_done_keyboard(user_id: int):
+    try:
+        with get_db() as db_session:
+            stmt = text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date = :today")
+            result = db_session.execute(stmt, {'uid': user_id, 'today': date.today()}).first()
+            if not result:
+                return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]])
+            stats = result._asdict()
+            buttons = []
+            activities = [
+                ('workout', '⚔️ Тренировка', 'done_workout'),
+                ('stretching', '🧘 Растяжка', 'done_stretching'),
+                ('english', '🎓 Английский', 'done_english'),
+                ('reflection', '🤔 Размышления', 'done_reflection'),
+                ('coding', '💻 Кодинг', 'done_coding'),
+                ('planning', '📝 План', 'done_planning'),
+                ('walk', '🚶 Прогулка', 'done_walk'),  # Оставлено, но не поддерживается в db.py
+            ]
+            row = []
+            for key, label, callback in activities:
+                if stats.get(f"{key}_planned", 0) == 1:
+                    row.append(InlineKeyboardButton(text=label, callback_data=callback))
+                    if len(row) == 2:
+                        buttons.append(row)
+                        row = []
+            if row:
+                buttons.append(row)
+            buttons.append([InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")])
+            return InlineKeyboardMarkup(inline_keyboard=buttons)
+    except Exception as e:
+        logger.error(f"Error generating mark done keyboard for user_id {user_id}: {e}")
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]])
 
 def get_confirm_clear_keyboard():
     buttons = [
         [InlineKeyboardButton(text="🔴 Да, стереть всё", callback_data="confirm_clear_yes")],
         [InlineKeyboardButton(text="🟢 Отмена", callback_data="confirm_clear_no")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_morning_day_type_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="🏖️ Отдых", callback_data="plan_day_rest")],
+        [InlineKeyboardButton(text="💼 Будни", callback_data="plan_day_workday")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ def get_db():
         db_session.close()
 
 def init_db():
-    # Таблицы создаются в Supabase SQL Editor
     pass
 
 def add_user(user_id: int, username: str, first_name: str):
@@ -50,13 +48,14 @@ def add_user(user_id: int, username: str, first_name: str):
         logger.error(f"Error adding user {user_id}: {e}")
         raise
 
-def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int):
+def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int, is_rest_day: bool = False):
     try:
         with get_db() as db:
             values = {
                 'user_id': user_id, 'stat_date': date.today(), 'screen_time_goal': screen_time,
                 'workout_planned': workout, 'english_planned': english, 'coding_planned': coding,
-                'planning_planned': planning, 'stretching_planned': stretching, 'reflection_planned': reflection
+                'planning_planned': planning, 'stretching_planned': stretching, 'reflection_planned': reflection,
+                'is_rest_day': is_rest_day
             }
             stmt = text("""
                 INSERT INTO daily_stats (
@@ -66,7 +65,8 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     coding_planned, coding_done,
                     planning_planned, planning_done,
                     stretching_planned, stretching_done,
-                    reflection_planned, reflection_done
+                    reflection_planned, reflection_done,
+                    morning_poll_completed, is_rest_day
                 )
                 VALUES (
                     :user_id, :stat_date, :screen_time_goal,
@@ -75,7 +75,8 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     :coding_planned, 0,
                     :planning_planned, 0,
                     :stretching_planned, 0,
-                    :reflection_planned, 0
+                    :reflection_planned, 0,
+                    :morning_poll_completed, :is_rest_day
                 )
                 ON CONFLICT (user_id, stat_date) DO UPDATE SET
                     screen_time_goal = :screen_time_goal,
@@ -84,9 +85,11 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     coding_planned = :coding_planned,
                     planning_planned = :planning_planned,
                     stretching_planned = :stretching_planned,
-                    reflection_planned = :reflection_planned
+                    reflection_planned = :reflection_planned,
+                    is_rest_day = :is_rest_day,
+                    morning_poll_completed = :morning_poll_completed
             """)
-            db.execute(stmt, values)
+            db.execute(stmt, {**values, 'morning_poll_completed': not is_rest_day})
             db.commit()
     except Exception as e:
         logger.error(f"Error saving morning plan for user {user_id}: {e}")
@@ -103,9 +106,10 @@ def mark_activity_done(user_id: int, activity_type: str):
                     coding_planned, coding_done,
                     planning_planned, planning_done,
                     stretching_planned, stretching_done,
-                    reflection_planned, reflection_done
+                    reflection_planned, reflection_done,
+                    is_rest_day
                 )
-                VALUES (:uid, :today, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                VALUES (:uid, :today, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false)
                 ON CONFLICT DO NOTHING
             """)
             db.execute(stmt, {'uid': user_id, 'today': date.today()})
@@ -151,10 +155,24 @@ def log_custom_activity(user_id: int, activity_name: str, duration_minutes: int)
         logger.error(f"Error logging activity for user {user_id}: {e}")
         raise
 
+def log_productive_activity(user_id: int, activity_name: str, duration_minutes: int):
+    try:
+        with get_db() as db:
+            stmt = text("""
+                INSERT INTO productive_activities (user_id, activity_date, activity_name, duration_minutes)
+                VALUES (:uid, :date, :name, :duration)
+            """)
+            db.execute(stmt, {'uid': user_id, 'date': date.today(), 'name': activity_name, 'duration': duration_minutes})
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error logging productive activity for user {user_id}: {e}")
+        raise
+
 def clear_user_data(user_id: int):
     try:
         with get_db() as db:
             db.execute(text("DELETE FROM screen_activities WHERE user_id = :uid"), {'uid': user_id})
+            db.execute(text("DELETE FROM productive_activities WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM daily_stats WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM achievements WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM users WHERE user_id = :uid"), {'uid': user_id})
