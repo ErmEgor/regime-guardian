@@ -442,7 +442,29 @@ async def day_type_chosen(callback: CallbackQuery, state: FSMContext):
         else:
             if callback.from_user.id in user_plans:
                 del user_plans[callback.from_user.id]
-            await callback.message.edit_text("☀️ Составьте план на сегодня:", reply_markup=keyboards.get_morning_poll_keyboard())
+            user_plans[callback.from_user.id] = {
+                'time': None,
+                'workout': 0,
+                'english': 0,
+                'coding': 0,
+                'planning': 0,
+                'stretching': 0,
+                'reflection': 0,
+                'walk': 0
+            }
+            message_text = "☀️ Составьте план на сегодня:\n\n⏰ Лимит времени: не выбрано\n" + "\n".join([
+                f"🏋️ Тренировка: {'✅' if user_plans[callback.from_user.id]['workout'] else '❌'}",
+                f"🗣 Язык: {'✅' if user_plans[callback.from_user.id]['english'] else '❌'}",
+                f"💻 Программирование: {'✅' if user_plans[callback.from_user.id]['coding'] else '❌'}",
+                f"📝 Планирование: {'✅' if user_plans[callback.from_user.id]['planning'] else '❌'}",
+                f"🧘 Растяжка: {'✅' if user_plans[callback.from_user.id]['stretching'] else '❌'}",
+                f"🤔 Рефлексия: {'✅' if user_plans[callback.from_user.id]['reflection'] else '❌'}",
+                f"🚶 Прогулка: {'✅' if user_plans[callback.from_user.id]['walk'] else '❌'}"
+            ])
+            await callback.message.edit_text(
+                message_text,
+                reply_markup=keyboards.get_morning_poll_keyboard(user_plans.get(callback.from_user.id))
+            )
             await state.clear()
         await callback.answer()
     except Exception as e:
@@ -474,13 +496,23 @@ async def handle_morning_plan(callback: CallbackQuery):
                 '5': 5 * 60,
                 '6': 6 * 60
             }
-            user_plans[user_id]['time'] = time_map.get(action[2], user_plans[user_id]['time'])
-            await callback.answer(f"Лимит времени: {action[2]}ч")
+            selected_time = action[2]
+            user_plans[user_id]['time'] = time_map.get(selected_time, user_plans[user_id]['time'])
+            await callback.answer(f"Лимит времени: {selected_time}ч")
         elif action[1] == 'toggle':
             habit = action[2]
             user_plans[user_id][habit] = 1 - user_plans[user_id][habit]
+            habit_display = {
+                'workout': 'Тренировка',
+                'english': 'Язык',
+                'coding': 'Программирование',
+                'planning': 'Планирование',
+                'stretching': 'Растяжка',
+                'reflection': 'Рефлексия',
+                'walk': 'Прогулка'
+            }.get(habit, habit.capitalize())
             status_text = "в планах" if user_plans[user_id][habit] == 1 else "не в планах"
-            await callback.answer(f"{habit.capitalize()} {status_text}")
+            await callback.answer(f"{habit_display} {status_text}")
         elif action[1] == 'done':
             plan = user_plans.get(user_id)
             if plan is None or plan['time'] is None:
@@ -557,12 +589,39 @@ async def handle_morning_plan(callback: CallbackQuery):
                 del user_plans[user_id]
                 await callback.message.edit_text("⚔️ План на день сохранён. Продуктивного дня, командир!")
                 await callback.answer()
+                return  # Выходим, чтобы не вызывать edit_text ниже
             except Exception as e:
                 logger.error(f"Error saving morning plan for user_id {user_id}: {e}")
                 await callback.message.edit_text("⚠️ Ошибка сохранения плана. Попробуйте позже.")
                 db_session.rollback()
                 await callback.answer()
-        await callback.message.edit_text("☀️ Составьте план на сегодня:", reply_markup=keyboards.get_morning_poll_keyboard())
+                return
+        # Обновляем сообщение с текущим состоянием плана
+        plan = user_plans[user_id]
+        time_text = f"{plan['time'] // 60}ч" if plan['time'] else "не выбрано"
+        activities = [
+            f"🏋️ Тренировка: {'✅' if plan['workout'] else '❌'}",
+            f"🗣 Язык: {'✅' if plan['english'] else '❌'}",
+            f"💻 Программирование: {'✅' if plan['coding'] else '❌'}",
+            f"📝 Планирование: {'✅' if plan['planning'] else '❌'}",
+            f"🧘 Растяжка: {'✅' if plan['stretching'] else '❌'}",
+            f"🤔 Рефлексия: {'✅' if plan['reflection'] else '❌'}",
+            f"🚶 Прогулка: {'✅' if plan['walk'] else '❌'}"
+        ]
+        message_text = f"☀️ Составьте план на сегодня:\n\n⏰ Лимит времени: {time_text}\n" + "\n".join(activities)
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=keyboards.get_morning_poll_keyboard(user_plans.get(user_id))
+        )
+        await callback.answer()
+    except TelegramAPIError as e:
+        if "message is not modified" in str(e):
+            logger.info(f"Message not modified for user_id {user_id}, skipping edit")
+            await callback.answer()
+        else:
+            logger.error(f"TelegramAPIError in handle_morning_plan for user_id {user_id}: {e}")
+            await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
+            await callback.answer()
     except Exception as e:
         logger.error(f"Error in handle_morning_plan for user_id {user_id}: {e}")
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
@@ -714,7 +773,7 @@ async def evening_summary_cron():
     try:
         with db.get_db() as db_session:
             stmt = text("SELECT user_id, is_rest_day FROM daily_stats WHERE stat_date = :today")
-            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
+            users = db_session.execute(stmt, {'uid': user_id, 'today': date.today()}).fetchall()
             if not users:
                 logger.warning("No users with stats for today found")
                 return {"status": "skipped", "message": "No users with stats for today"}
@@ -741,11 +800,12 @@ async def evening_summary_cron():
                         return "не запланировано" if not planned else "✅ Выполнено!" if done else "❌ Пропущено"
                     summary_lines.extend([
                         f"⚔️ Тренировка: {get_status(stats['workout_planned'], stats['workout_done'])}",
-                        f"🎓 Английский: {get_status(stats['english_planned'], stats['english_done'])}",
+                        f"🎓 Язык: {get_status(stats['english_planned'], stats['english_done'])}",
                         f"💻 Программирование: {get_status(stats['coding_planned'], stats['coding_done'])}",
                         f"📝 Планирование: {get_status(stats['planning_planned'], stats['planning_done'])}",
                         f"🧘 Растяжка: {get_status(stats['stretching_planned'], stats['stretching_done'])}",
                         f"🤔 Рефлексия: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
+                        f"🚶 Прогулка: {get_status(stats['walk_planned'], stats['walk_done'])}",
                     ])
                     await bot.send_message(user_id, "\n".join(summary_lines))
                     logger.info(f"Sent evening summary to user_id: {user_id}")

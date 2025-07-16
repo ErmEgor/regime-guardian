@@ -75,29 +75,70 @@ def get_morning_day_type_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_morning_poll_keyboard():
+def get_morning_poll_keyboard(user_plan: dict = None):
+    if user_plan is None:
+        user_plan = {
+            'time': None,
+            'workout': 0,
+            'english': 0,
+            'coding': 0,
+            'planning': 0,
+            'stretching': 0,
+            'reflection': 0,
+            'walk': 0
+        }
     buttons = [
         [InlineKeyboardButton(text="Экранное время", callback_data="inactive")],
         [
-            InlineKeyboardButton(text="4ч", callback_data="plan_time_4"),
-            InlineKeyboardButton(text="5ч", callback_data="plan_time_5"),
-            InlineKeyboardButton(text="6ч", callback_data="plan_time_6")
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['time'] == 4*60 else ''}4ч",
+                callback_data="plan_time_4"
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['time'] == 5*60 else ''}5ч",
+                callback_data="plan_time_5"
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['time'] == 6*60 else ''}6ч",
+                callback_data="plan_time_6"
+            )
         ],
         [InlineKeyboardButton(text="Главные активности", callback_data="inactive")],
         [
-            InlineKeyboardButton(text="⚔️ Тренировка", callback_data="plan_toggle_workout"),
-            InlineKeyboardButton(text="🎓 Язык", callback_data="plan_toggle_english")
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['workout'] else ''}⚔️ Тренировка",
+                callback_data="plan_toggle_workout"
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['english'] else ''}🎓 Язык",
+                callback_data="plan_toggle_english"
+            )
         ],
         [
-            InlineKeyboardButton(text="💻 Кодинг", callback_data="plan_toggle_coding"),
-            InlineKeyboardButton(text="📝 План", callback_data="plan_toggle_planning")
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['coding'] else ''}💻 Кодинг",
+                callback_data="plan_toggle_coding"
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['planning'] else ''}📝 План",
+                callback_data="plan_toggle_planning"
+            )
         ],
         [
-            InlineKeyboardButton(text="🧘 Растяжка", callback_data="plan_toggle_stretching"),
-            InlineKeyboardButton(text="🤔 Размышления", callback_data="plan_toggle_reflection")
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['stretching'] else ''}🧘 Растяжка",
+                callback_data="plan_toggle_stretching"
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['reflection'] else ''}🤔 Размышления",
+                callback_data="plan_toggle_reflection"
+            )
         ],
         [
-            InlineKeyboardButton(text="🚶 Прогулка", callback_data="plan_toggle_walk")
+            InlineKeyboardButton(
+                text=f"{'✅ ' if user_plan['walk'] else ''}🚶 Прогулка",
+                callback_data="plan_toggle_walk"
+            )
         ],
         [InlineKeyboardButton(text="✅ Готово! Сохранить план", callback_data="plan_done")]
     ]
