@@ -523,7 +523,7 @@ async def day_type_chosen(callback: CallbackQuery, state: FSMContext):
                 f"💻 Программирование: {'✅' if user_plans[callback.from_user.id]['coding'] else '❌'}",
                 f"📝 Планирование: {'✅' if user_plans[callback.from_user.id]['planning'] else '❌'}",
                 f"🧘 Растяжка: {'✅' if user_plans[callback.from_user.id]['stretching'] else '❌'}",
-                f"🤔 Рефлексия: {'✅' if user_plans[callback.from_user.id]['reflection'] else '❌'}",
+                f"🤔 Размышление: {'✅' if user_plans[callback.from_user.id]['reflection'] else '❌'}",
                 f"🚶 Прогулка: {'✅' if user_plans[callback.from_user.id]['walk'] else '❌'}"
             ])
             await callback.message.edit_text(
@@ -573,7 +573,7 @@ async def handle_morning_plan(callback: CallbackQuery):
                 'coding': 'Программирование',
                 'planning': 'Планирование',
                 'stretching': 'Растяжка',
-                'reflection': 'Рефлексия',
+                'reflection': 'Размышление',
                 'walk': 'Прогулка'
             }.get(habit, habit.capitalize())
             status_text = "в планах" if user_plans[user_id][habit] == 1 else "не в планах"
@@ -670,7 +670,7 @@ async def handle_morning_plan(callback: CallbackQuery):
             f"💻 Программирование: {'✅' if plan['coding'] else '❌'}",
             f"📝 Планирование: {'✅' if plan['planning'] else '❌'}",
             f"🧘 Растяжка: {'✅' if plan['stretching'] else '❌'}",
-            f"🤔 Рефлексия: {'✅' if plan['reflection'] else '❌'}",
+            f"🤔 Размышление: {'✅' if plan['reflection'] else '❌'}",
             f"🚶 Прогулка: {'✅' if plan['walk'] else '❌'}"
         ]
         message_text = f"☀️ Составьте план на сегодня:\n\n⏰ Лимит времени: {time_text}\n" + "\n".join(activities)
@@ -869,7 +869,7 @@ async def evening_summary_cron():
                         f"💻 Программирование: {get_status(stats['coding_planned'], stats['coding_done'])}",
                         f"📝 Планирование: {get_status(stats['planning_planned'], stats['planning_done'])}",
                         f"🧘 Растяжка: {get_status(stats['stretching_planned'], stats['stretching_done'])}",
-                        f"🤔 Рефлексия: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
+                        f"🤔 Размышление: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
                         f"🚶 Прогулка: {get_status(stats['walk_planned'], stats['walk_done'])}",
                     ])
                     await bot.send_message(user_id, "\n".join(summary_lines))
