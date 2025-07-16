@@ -20,6 +20,14 @@ def get_main_menu_keyboard(include_settings: bool = False):
     builder.adjust(1)
     return builder.as_markup()
 
+def get_achievements_menu_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="📜 Просмотреть достижения", callback_data="achievements_view")],
+        [InlineKeyboardButton(text="✍️ Добавить достижение", callback_data="achievements_add")],
+        [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def get_log_activity_type_keyboard():
     buttons = [
         [InlineKeyboardButton(text="📱 Не полезная", callback_data="log_type_screen")],

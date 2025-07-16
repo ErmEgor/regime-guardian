@@ -8,6 +8,7 @@ import psutil
 import time
 import threading
 import pendulum
+from datetime import datetime
 
 # Временный обход для импорта keyboards и db
 sys.path.append(os.path.dirname(__file__))
@@ -113,6 +114,11 @@ class LogActivity(StatesGroup):
 class MorningPoll(StatesGroup):
     choosing_day_type = State()
 
+# --- FSM для записи спортивных достижений ---
+class SportAchievement(StatesGroup):
+    choosing_date = State()
+    choosing_description = State()
+
 # --- Глобальное хранилище планов ---
 user_plans: Dict[int, Dict[str, Optional[int]]] = {}
 
@@ -168,49 +174,108 @@ async def cmd_menu(message: Message, state: FSMContext):
 async def cmd_achievements(message: Message):
     logger.info(f"Received /achievements from user_id: {message.from_user.id}")
     try:
-        with db.get_db() as db_session:
-            stmt = text("SELECT achievement_name, awarded_at FROM achievements WHERE user_id = :uid ORDER BY awarded_at DESC")
-            achievements = db_session.execute(stmt, {'uid': message.from_user.id}).fetchall()
-            if not achievements:
-                await message.answer("🏆 У вас пока нет достижений. Продолжайте работать над собой!", reply_markup=types.ReplyKeyboardRemove())
-                return
-            achievement_lines = ["🏆 Ваши достижения:\n"]
-            for ach in achievements:
-                achievement_lines.append(f"• {ach.achievement_name} ({ach.awarded_at.strftime('%d.%m.%Y')})")
-            await message.answer("\n".join(achievement_lines), reply_markup=types.ReplyKeyboardRemove())
+        await message.answer("Что вы хотите сделать с достижениями?", reply_markup=keyboards.get_achievements_menu_keyboard())
     except Exception as e:
         logger.error(f"Error in /achievements for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
 @dp.callback_query(lambda c: c.data == "menu_achievements")
-async def cq_achievements(callback: CallbackQuery):
+async def cq_achievements_menu(callback: CallbackQuery):
     logger.info(f"Received callback menu_achievements from user_id: {callback.from_user.id}")
     try:
+        await callback.message.edit_text("Что вы хотите сделать с достижениями?", reply_markup=keyboards.get_achievements_menu_keyboard())
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in menu_achievements for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data == "achievements_view")
+async def cq_view_achievements(callback: CallbackQuery):
+    logger.info(f"Received callback achievements_view from user_id: {callback.from_user.id}")
+    try:
         with db.get_db() as db_session:
-            stmt = text("SELECT achievement_name, awarded_at FROM achievements WHERE user_id = :uid ORDER BY awarded_at DESC")
+            stmt = text("SELECT achievement_name, date_earned FROM sport_achievements WHERE user_id = :uid ORDER BY date_earned DESC")
             achievements = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
             if not achievements:
                 await callback.message.edit_text(
-                    "🏆 У вас пока нет достижений. Продолжайте работать над собой!",
-                    reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+                    "🏆 У вас пока нет спортивных достижений. Добавьте первое!",
+                    reply_markup=keyboards.get_achievements_menu_keyboard()
                 )
                 await callback.answer()
                 return
-            achievement_lines = ["🏆 Ваши достижения:\n"]
+            achievement_lines = ["🏆 Ваши спортивные достижения:\n"]
             for ach in achievements:
-                achievement_lines.append(f"• {ach.achievement_name} ({ach.awarded_at.strftime('%d.%m.%Y')})")
+                achievement_lines.append(f"• {ach.achievement_name} ({ach.date_earned.strftime('%d.%m.%Y')})")
             await callback.message.edit_text(
                 "\n".join(achievement_lines),
-                reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+                reply_markup=keyboards.get_achievements_menu_keyboard()
             )
             await callback.answer()
     except Exception as e:
-        logger.error(f"Error in menu_achievements for user_id {callback.from_user.id}: {e}")
+        logger.error(f"Error in achievements_view for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text(
             "⚠️ Ошибка при загрузке достижений. Попробуйте позже.",
-            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+            reply_markup=keyboards.get_achievements_menu_keyboard()
         )
         await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "achievements_add", StateFilter("*"))
+async def cq_add_achievement(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback achievements_add from user_id: {callback.from_user.id}")
+    try:
+        await state.clear()
+        await callback.message.edit_text(
+            "Введите дату достижения в формате ДД.ММ (например, 15.10):",
+            reply_markup=keyboards.get_cancel_keyboard()
+        )
+        await state.set_state(SportAchievement.choosing_date)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in achievements_add for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.message(StateFilter(SportAchievement.choosing_date))
+async def achievement_date_chosen(message: Message, state: FSMContext):
+    logger.info(f"Achievement date chosen by user_id: {message.from_user.id}: {message.text}")
+    try:
+        date_str = message.text.strip()
+        try:
+            datetime.strptime(date_str, '%d.%m')
+        except ValueError:
+            await message.answer("Ошибка. Введите дату в формате ДД.ММ (например, 15.10).", reply_markup=keyboards.get_cancel_keyboard())
+            return
+        await state.update_data(achievement_date=date_str)
+        await message.answer("Опишите достижение (например, '25 подтягиваний'):", reply_markup=keyboards.get_cancel_keyboard())
+        await state.set_state(SportAchievement.choosing_description)
+    except Exception as e:
+        logger.error(f"Error in achievement_date_chosen for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message(StateFilter(SportAchievement.choosing_description))
+async def achievement_description_chosen(message: Message, state: FSMContext):
+    logger.info(f"Achievement description chosen by user_id: {message.from_user.id}: {message.text}")
+    try:
+        achievement_name = message.text.strip()
+        user_data = await state.get_data()
+        date_str = user_data.get('achievement_date')
+        try:
+            day, month = map(int, date_str.split('.'))
+            current_year = datetime.now().year
+            date_earned = datetime(current_year, month, day).date()
+        except ValueError:
+            await message.answer("Ошибка в формате даты. Попробуйте снова с /achievements.", reply_markup=types.ReplyKeyboardRemove())
+            await state.clear()
+            return
+        db.add_sport_achievement(message.from_user.id, achievement_name, date_earned)
+        await message.answer(
+            f"🏆 Достижение '{achievement_name}' ({date_earned.strftime('%d.%m.%Y')}) добавлено!",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        await state.clear()
+        await message.answer("Что вы хотите сделать с достижениями?", reply_markup=keyboards.get_achievements_menu_keyboard())
+    except Exception as e:
+        logger.error(f"Error in achievement_description_chosen for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
 @dp.callback_query(lambda c: c.data == "menu_settings")
 async def cq_menu_settings(callback: CallbackQuery):
@@ -773,7 +838,7 @@ async def evening_summary_cron():
     try:
         with db.get_db() as db_session:
             stmt = text("SELECT user_id, is_rest_day FROM daily_stats WHERE stat_date = :today")
-            users = db_session.execute(stmt, {'uid': user_id, 'today': date.today()}).fetchall()
+            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
             if not users:
                 logger.warning("No users with stats for today found")
                 return {"status": "skipped", "message": "No users with stats for today"}

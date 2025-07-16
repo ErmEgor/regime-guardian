@@ -31,7 +31,23 @@ def get_db():
         db_session.close()
 
 def init_db():
-    pass
+    try:
+        with get_db() as db:
+            # Создание таблицы sport_achievements
+            stmt = text("""
+                CREATE TABLE IF NOT EXISTS sport_achievements (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    achievement_name TEXT NOT NULL,
+                    date_earned DATE NOT NULL
+                )
+            """)
+            db.execute(stmt)
+            db.commit()
+            logger.info("Table sport_achievements created or already exists")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 def add_user(user_id: int, username: str, first_name: str):
     try:
@@ -45,6 +61,19 @@ def add_user(user_id: int, username: str, first_name: str):
             db.commit()
     except Exception as e:
         logger.error(f"Error adding user {user_id}: {e}")
+        raise
+
+def add_sport_achievement(user_id: int, achievement_name: str, date_earned: date):
+    try:
+        with get_db() as db:
+            stmt = text("""
+                INSERT INTO sport_achievements (user_id, achievement_name, date_earned)
+                VALUES (:uid, :name, :date)
+            """)
+            db.execute(stmt, {'uid': user_id, 'name': achievement_name, 'date': date_earned})
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error adding sport achievement for user {user_id}: {e}")
         raise
 
 def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int, walk: int, is_rest_day: bool = False):
@@ -177,7 +206,7 @@ def clear_user_data(user_id: int):
             db.execute(text("DELETE FROM screen_activities WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM productive_activities WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM daily_stats WHERE user_id = :uid"), {'uid': user_id})
-            db.execute(text("DELETE FROM achievements WHERE user_id = :uid"), {'uid': user_id})
+            db.execute(text("DELETE FROM sport_achievements WHERE user_id = :uid"), {'uid': user_id})
             db.execute(text("DELETE FROM users WHERE user_id = :uid"), {'uid': user_id})
             db.commit()
     except Exception as e:
