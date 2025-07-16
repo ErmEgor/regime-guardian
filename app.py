@@ -182,6 +182,36 @@ async def cmd_achievements(message: Message):
         logger.error(f"Error in /achievements for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
+@dp.callback_query(lambda c: c.data == "menu_achievements")
+async def cq_achievements(callback: CallbackQuery):
+    logger.info(f"Received callback menu_achievements from user_id: {callback.from_user.id}")
+    try:
+        with db.get_db() as db_session:
+            stmt = text("SELECT achievement_name, awarded_at FROM achievements WHERE user_id = :uid ORDER BY awarded_at DESC")
+            achievements = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            if not achievements:
+                await callback.message.edit_text(
+                    "🏆 У вас пока нет достижений. Продолжайте работать над собой!",
+                    reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+                )
+                await callback.answer()
+                return
+            achievement_lines = ["🏆 Ваши достижения:\n"]
+            for ach in achievements:
+                achievement_lines.append(f"• {ach.achievement_name} ({ach.awarded_at.strftime('%d.%m.%Y')})")
+            await callback.message.edit_text(
+                "\n".join(achievement_lines),
+                reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+            )
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in menu_achievements for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке достижений. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer()
+
 @dp.callback_query(lambda c: c.data == "menu_settings")
 async def cq_menu_settings(callback: CallbackQuery):
     logger.info(f"Received callback menu_settings from user_id: {callback.from_user.id}")
@@ -404,6 +434,7 @@ async def day_type_chosen(callback: CallbackQuery, state: FSMContext):
                 planning=0,
                 stretching=0,
                 reflection=0,
+                walk=0,
                 is_rest_day=True
             )
             await callback.message.edit_text("🏖️ Хорошего отдыха, командир!")
@@ -425,9 +456,25 @@ async def handle_morning_plan(callback: CallbackQuery):
     logger.info(f"Morning plan action: {callback.data} for user_id: {user_id}")
     try:
         if user_id not in user_plans:
-            user_plans[user_id] = {'time': None, 'workout': 0, 'english': 0, 'coding': 0, 'planning': 0, 'stretching': 0, 'reflection': 0}
+            user_plans[user_id] = {
+                'time': None,
+                'workout': 0,
+                'english': 0,
+                'coding': 0,
+                'planning': 0,
+                'stretching': 0,
+                'reflection': 0,
+                'walk': 0
+            }
         if action[1] == 'time':
-            user_plans[user_id]['time'] = int(action[2]) * 60
+            time_map = {
+                '2': 2 * 60,
+                '3': 3 * 60,
+                '4': 4 * 60,
+                '5': 5 * 60,
+                '6': 6 * 60
+            }
+            user_plans[user_id]['time'] = time_map.get(action[2], user_plans[user_id]['time'])
             await callback.answer(f"Лимит времени: {action[2]}ч")
         elif action[1] == 'toggle':
             habit = action[2]
@@ -460,6 +507,8 @@ async def handle_morning_plan(callback: CallbackQuery):
                                 stretching_done = :stretching_done,
                                 reflection_planned = :reflection_planned,
                                 reflection_done = :reflection_done,
+                                walk_planned = :walk_planned,
+                                walk_done = :walk_done,
                                 morning_poll_completed = :morning_poll_completed,
                                 is_rest_day = :is_rest_day
                             WHERE user_id = :uid AND stat_date = :today
@@ -471,12 +520,14 @@ async def handle_morning_plan(callback: CallbackQuery):
                                 workout_planned, workout_done, english_planned, english_done,
                                 coding_planned, coding_done, planning_planned, planning_done,
                                 stretching_planned, stretching_done, reflection_planned, reflection_done,
+                                walk_planned, walk_done,
                                 morning_poll_completed, is_rest_day
                             ) VALUES (
                                 :uid, :today, :screen_time_goal, :screen_time_actual,
                                 :workout_planned, :workout_done, :english_planned, :english_done,
                                 :coding_planned, :coding_done, :planning_planned, :planning_done,
                                 :stretching_planned, :stretching_done, :reflection_planned, :reflection_done,
+                                :walk_planned, :walk_done,
                                 :morning_poll_completed, :is_rest_day
                             )
                         """)
@@ -497,6 +548,8 @@ async def handle_morning_plan(callback: CallbackQuery):
                         'stretching_done': 0,
                         'reflection_planned': plan['reflection'],
                         'reflection_done': 0,
+                        'walk_planned': plan['walk'],
+                        'walk_done': 0,
                         'morning_poll_completed': True,
                         'is_rest_day': False
                     })
@@ -509,6 +562,7 @@ async def handle_morning_plan(callback: CallbackQuery):
                 await callback.message.edit_text("⚠️ Ошибка сохранения плана. Попробуйте позже.")
                 db_session.rollback()
                 await callback.answer()
+        await callback.message.edit_text("☀️ Составьте план на сегодня:", reply_markup=keyboards.get_morning_poll_keyboard())
     except Exception as e:
         logger.error(f"Error in handle_morning_plan for user_id {user_id}: {e}")
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
@@ -692,7 +746,6 @@ async def evening_summary_cron():
                         f"📝 Планирование: {get_status(stats['planning_planned'], stats['planning_done'])}",
                         f"🧘 Растяжка: {get_status(stats['stretching_planned'], stats['stretching_done'])}",
                         f"🤔 Рефлексия: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
-                        "\nСпокойной ночи, командир. Завтра — новый бой!"
                     ])
                     await bot.send_message(user_id, "\n".join(summary_lines))
                     logger.info(f"Sent evening summary to user_id: {user_id}")

@@ -40,11 +40,11 @@ def get_mark_done_keyboard(user_id: int):
             activities = [
                 ('workout', '⚔️ Тренировка', 'done_workout'),
                 ('stretching', '🧘 Растяжка', 'done_stretching'),
-                ('english', '🎓 Английский', 'done_english'),
+                ('english', '🎓 Язык', 'done_english'),
                 ('reflection', '🤔 Размышления', 'done_reflection'),
                 ('coding', '💻 Кодинг', 'done_coding'),
                 ('planning', '📝 План', 'done_planning'),
-                ('walk', '🚶 Прогулка', 'done_walk'),  # Оставлено, но не поддерживается в db.py
+                ('walk', '🚶 Прогулка', 'done_walk'),
             ]
             row = []
             for key, label, callback in activities:
@@ -77,14 +77,16 @@ def get_morning_day_type_keyboard():
 
 def get_morning_poll_keyboard():
     buttons = [
+        [InlineKeyboardButton(text="Экранное время", callback_data="inactive")],
         [
-            InlineKeyboardButton(text="< 2ч", callback_data="plan_time_2"),
-            InlineKeyboardButton(text="< 3ч", callback_data="plan_time_3"),
-            InlineKeyboardButton(text="< 4ч", callback_data="plan_time_4")
+            InlineKeyboardButton(text="4ч", callback_data="plan_time_4"),
+            InlineKeyboardButton(text="5ч", callback_data="plan_time_5"),
+            InlineKeyboardButton(text="6ч", callback_data="plan_time_6")
         ],
+        [InlineKeyboardButton(text="Главные активности", callback_data="inactive")],
         [
             InlineKeyboardButton(text="⚔️ Тренировка", callback_data="plan_toggle_workout"),
-            InlineKeyboardButton(text="🎓 Английский", callback_data="plan_toggle_english")
+            InlineKeyboardButton(text="🎓 Язык", callback_data="plan_toggle_english")
         ],
         [
             InlineKeyboardButton(text="💻 Кодинг", callback_data="plan_toggle_coding"),
@@ -93,6 +95,9 @@ def get_morning_poll_keyboard():
         [
             InlineKeyboardButton(text="🧘 Растяжка", callback_data="plan_toggle_stretching"),
             InlineKeyboardButton(text="🤔 Размышления", callback_data="plan_toggle_reflection")
+        ],
+        [
+            InlineKeyboardButton(text="🚶 Прогулка", callback_data="plan_toggle_walk")
         ],
         [InlineKeyboardButton(text="✅ Готово! Сохранить план", callback_data="plan_done")]
     ]

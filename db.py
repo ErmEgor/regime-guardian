@@ -2,7 +2,6 @@ import os
 import logging
 from contextlib import contextmanager
 from datetime import date
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -48,14 +47,14 @@ def add_user(user_id: int, username: str, first_name: str):
         logger.error(f"Error adding user {user_id}: {e}")
         raise
 
-def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int, is_rest_day: bool = False):
+def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int, coding: int, planning: int, stretching: int, reflection: int, walk: int, is_rest_day: bool = False):
     try:
         with get_db() as db:
             values = {
                 'user_id': user_id, 'stat_date': date.today(), 'screen_time_goal': screen_time,
                 'workout_planned': workout, 'english_planned': english, 'coding_planned': coding,
                 'planning_planned': planning, 'stretching_planned': stretching, 'reflection_planned': reflection,
-                'is_rest_day': is_rest_day
+                'walk_planned': walk, 'is_rest_day': is_rest_day
             }
             stmt = text("""
                 INSERT INTO daily_stats (
@@ -66,6 +65,7 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     planning_planned, planning_done,
                     stretching_planned, stretching_done,
                     reflection_planned, reflection_done,
+                    walk_planned, walk_done,
                     morning_poll_completed, is_rest_day
                 )
                 VALUES (
@@ -76,6 +76,7 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     :planning_planned, 0,
                     :stretching_planned, 0,
                     :reflection_planned, 0,
+                    :walk_planned, 0,
                     :morning_poll_completed, :is_rest_day
                 )
                 ON CONFLICT (user_id, stat_date) DO UPDATE SET
@@ -86,6 +87,7 @@ def save_morning_plan(user_id: int, screen_time: int, workout: int, english: int
                     planning_planned = :planning_planned,
                     stretching_planned = :stretching_planned,
                     reflection_planned = :reflection_planned,
+                    walk_planned = :walk_planned,
                     is_rest_day = :is_rest_day,
                     morning_poll_completed = :morning_poll_completed
             """)
@@ -107,9 +109,10 @@ def mark_activity_done(user_id: int, activity_type: str):
                     planning_planned, planning_done,
                     stretching_planned, stretching_done,
                     reflection_planned, reflection_done,
+                    walk_planned, walk_done,
                     is_rest_day
                 )
-                VALUES (:uid, :today, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false)
+                VALUES (:uid, :today, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false)
                 ON CONFLICT DO NOTHING
             """)
             db.execute(stmt, {'uid': user_id, 'today': date.today()})
