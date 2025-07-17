@@ -114,7 +114,20 @@ def init_db():
                     current_value INTEGER DEFAULT 0,
                     start_date DATE NOT NULL,
                     end_date DATE NOT NULL,
-                    is_completed BOOLEAN DEFAULT FALSE
+                    is_completed BOOLEAN DEFAULT FALSE,
+                    streak INTEGER DEFAULT 0
+                )
+            """))
+            
+            # Создание таблицы goal_completions
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS goal_completions (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    goal_id INTEGER NOT NULL,
+                    completion_date DATE NOT NULL,
+                    completed BOOLEAN NOT NULL,
+                    UNIQUE(user_id, goal_id, completion_date)
                 )
             """))
             
@@ -322,12 +335,12 @@ def log_productive_activity(user_id: int, activity_name: str, duration_minutes: 
         logger.error(f"Error logging productive activity for user {user_id}: {e}")
         raise
 
-def add_goal(user_id: int, goal_name: str, goal_type: str, target_value: int, current_value: int, start_date: date, end_date: date):
+def add_goal(user_id: int, goal_name: str, goal_type: str, target_value: int, current_value: int, start_date: date, end_date: date, streak: int = 0):
     try:
         with get_db() as db:
             db.execute(text("""
-                INSERT INTO goals (user_id, goal_name, goal_type, target_value, current_value, start_date, end_date)
-                VALUES (:user_id, :goal_name, :goal_type, :target_value, :current_value, :start_date, :end_date)
+                INSERT INTO goals (user_id, goal_name, goal_type, target_value, current_value, start_date, end_date, is_completed, streak)
+                VALUES (:user_id, :goal_name, :goal_type, :target_value, :current_value, :start_date, :end_date, :is_completed, :streak)
             """), {
                 'user_id': user_id,
                 'goal_name': goal_name,
@@ -335,7 +348,9 @@ def add_goal(user_id: int, goal_name: str, goal_type: str, target_value: int, cu
                 'target_value': target_value,
                 'current_value': current_value,
                 'start_date': start_date,
-                'end_date': end_date
+                'end_date': end_date,
+                'is_completed': False,
+                'streak': streak
             })
             db.commit()
             logger.info(f"Added goal '{goal_name}' for user {user_id}")
@@ -343,23 +358,118 @@ def add_goal(user_id: int, goal_name: str, goal_type: str, target_value: int, cu
         logger.error(f"Error adding goal for user {user_id}: {e}")
         raise
 
-def update_goal_progress(user_id: int, goal_type: str, increment: int):
+def log_goal_completion(user_id: int, goal_id: int, completed: bool):
     try:
         with get_db() as db:
             db.execute(text("""
-                UPDATE goals
-                SET current_value = current_value + :increment
-                WHERE user_id = :user_id AND goal_type = :goal_type AND is_completed = false
-            """), {'user_id': user_id, 'goal_type': goal_type, 'increment': increment})
-            db.execute(text("""
-                UPDATE goals
-                SET is_completed = true
-                WHERE user_id = :user_id AND goal_type = :goal_type AND current_value >= target_value AND is_completed = false
-            """), {'user_id': user_id, 'goal_type': goal_type})
+                INSERT INTO goal_completions (user_id, goal_id, completion_date, completed)
+                VALUES (:user_id, :goal_id, :completion_date, :completed)
+                ON CONFLICT (user_id, goal_id, completion_date)
+                DO UPDATE SET completed = :completed
+            """), {
+                'user_id': user_id,
+                'goal_id': goal_id,
+                'completion_date': date.today(),
+                'completed': completed
+            })
             db.commit()
-            logger.info(f"Updated goal progress for user {user_id}, type {goal_type}")
+            logger.info(f"Logged goal completion for user {user_id}, goal {goal_id}")
+    except Exception as e:
+        logger.error(f"Error logging goal completion for user {user_id}: {e}")
+        raise
+
+def update_goal_progress(user_id: int, activity_type: str, value: int):
+    try:
+        with get_db() as db:
+            # Проверяем, есть ли цели, связанные с этой активностью
+            stmt = text("""
+                SELECT id, goal_name, goal_type, target_value, current_value
+                FROM goals
+                WHERE user_id = :uid AND is_completed = false
+            """)
+            goals = db.execute(stmt, {'uid': user_id}).fetchall()
+            for goal in goals:
+                goal_id = goal.id
+                goal_type = goal.goal_type
+                target_value = goal.target_value
+                current_value = goal.current_value
+                # Пример: связываем активность "workout" с целями, связанными с тренировками
+                if activity_type == 'workout' and 'трениров' in goal.goal_name.lower():
+                    new_value = current_value + value
+                    if goal_type == 'daily' or (goal_type == 'weekly' and new_value <= target_value):
+                        db.execute(text("""
+                            UPDATE goals
+                            SET current_value = :new_value
+                            WHERE id = :goal_id
+                        """), {
+                            'new_value': min(new_value, target_value),
+                            'goal_id': goal_id
+                        })
+                        if new_value >= target_value:
+                            db.execute(text("""
+                                UPDATE goals
+                                SET is_completed = true
+                                WHERE id = :goal_id
+                            """), {'goal_id': goal_id})
+            db.commit()
+            logger.info(f"Updated goal progress for user {user_id}, activity {activity_type}")
     except Exception as e:
         logger.error(f"Error updating goal progress for user {user_id}: {e}")
+        raise
+
+def update_goal_streak(user_id: int, goal_id: int):
+    try:
+        with get_db() as db:
+            # Получаем тип цели и текущий стрик
+            stmt = text("""
+                SELECT goal_type, streak, start_date, target_value
+                FROM goals
+                WHERE id = :goal_id AND user_id = :uid
+            """)
+            goal = db.execute(stmt, {'goal_id': goal_id, 'uid': user_id}).first()
+            if not goal:
+                logger.warning(f"Goal {goal_id} not found for user {user_id}")
+                return
+            goal_type, current_streak, start_date, target_value = goal
+            today = date.today()
+            
+            # Проверяем, был ли предыдущий день/неделя успешной
+            if goal_type == 'daily':
+                stmt = text("""
+                    SELECT completed
+                    FROM goal_completions
+                    WHERE goal_id = :goal_id AND completion_date = :prev_date
+                """)
+                prev_date = today - timedelta(days=1)
+                prev_completion = db.execute(stmt, {'goal_id': goal_id, 'prev_date': prev_date}).first()
+                new_streak = current_streak + 1 if prev_completion and prev_completion.completed else 1
+            else:  # weekly
+                week_start = today - timedelta(days=today.weekday())
+                week_number = (today - start_date).days // 7
+                stmt = text("""
+                    SELECT COUNT(*) as completed_days
+                    FROM goal_completions
+                    WHERE goal_id = :goal_id AND completion_date >= :week_start AND completion_date <= :today AND completed = true
+                """)
+                completed_days = db.execute(stmt, {'goal_id': goal_id, 'week_start': week_start, 'today': today}).first().completed_days
+                prev_week_start = week_start - timedelta(days=7)
+                stmt = text("""
+                    SELECT COUNT(*) as prev_completed_days
+                    FROM goal_completions
+                    WHERE goal_id = :goal_id AND completion_date >= :prev_week_start AND completion_date < :week_start AND completed = true
+                """)
+                prev_completed_days = db.execute(stmt, {'goal_id': goal_id, 'prev_week_start': prev_week_start, 'week_start': week_start}).first().prev_completed_days
+                new_streak = current_streak + 1 if completed_days >= target_value and prev_completed_days >= target_value else (1 if completed_days >= target_value else 0)
+            
+            db.execute(text("""
+                UPDATE goals
+                SET streak = :new_streak
+                WHERE id = :goal_id
+            """), {'new_streak': new_streak, 'goal_id': goal_id})
+            db.commit()
+            logger.info(f"Updated goal streak for user {user_id}, goal {goal_id}")
+    except Exception as e:
+        logger.error(f"Error updating goal streak for user {user_id}: {e}")
         raise
 
 def add_habit(user_id: int, habit_name: str):
@@ -413,6 +523,8 @@ def save_productivity_answer(user_id: int, question: str, answer: str):
             db.commit()
             logger.info(f"Saved productivity answer for user {user_id}")
     except Exception as e:
+        logger.error(f" jude, :answer)")
+    except Exception as e:
         logger.error(f"Error saving productivity answer for user {user_id}: {e}")
         raise
 
@@ -452,6 +564,7 @@ def clear_user_data(user_id: int):
             db.execute(text("DELETE FROM sport_achievements WHERE user_id = :user_id"), {'user_id': user_id})
             db.execute(text("DELETE FROM screen_activities WHERE user_id = :user_id"), {'user_id': user_id})
             db.execute(text("DELETE FROM productive_activities WHERE user_id = :user_id"), {'user_id': user_id})
+            db.execute(text("DELETE FROM goal_completions WHERE user_id = :user_id"), {'user_id': user_id})
             db.execute(text("DELETE FROM goals WHERE user_id = :user_id"), {'user_id': user_id})
             db.execute(text("DELETE FROM habit_completions WHERE user_id = :user_id"), {'user_id': user_id})
             db.execute(text("DELETE FROM habits WHERE user_id = :user_id"), {'user_id': user_id})

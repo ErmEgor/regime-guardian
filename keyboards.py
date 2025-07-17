@@ -52,6 +52,18 @@ def get_habits_menu_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def get_goals_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает подменю для работы с целями.
+    """
+    logger.debug("Creating goals menu keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="📜 Просмотреть цели", callback_data="goals_view")],
+        [InlineKeyboardButton(text="✍️ Добавить цель", callback_data="goals_add")],
+        [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def get_tips_categories_keyboard() -> InlineKeyboardMarkup:
     """
     Создает клавиатуру с категориями советов.
@@ -268,6 +280,43 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """
     logger.debug("Creating cancel keyboard")
     buttons = [
+        [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_goal_answer_keyboard(goal_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для ответа на вопрос о выполнении цели.
+    """
+    logger.debug(f"Creating goal answer keyboard for goal_id: {goal_id}")
+    buttons = [
+        [
+            InlineKeyboardButton(text="✅ Да", callback_data=f"goal_answer_{goal_id}_yes"),
+            InlineKeyboardButton(text="❌ Нет", callback_data=f"goal_answer_{goal_id}_no")
+        ],
+        [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_goal_type_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора типа цели (ежедневная или еженедельная).
+    """
+    logger.debug("Creating goal type keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="Ежедневная", callback_data="goal_type_daily")],
+        [InlineKeyboardButton(text="Еженедельная", callback_data="goal_type_weekly")],
+        [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_goal_confirm_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для подтверждения создания цели.
+    """
+    logger.debug("Creating goal confirm keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="goal_confirm")],
         [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
