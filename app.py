@@ -33,7 +33,7 @@ import keyboards
 
 TIMEZONE = "Asia/Almaty"
 
-# --- Настройка логирования ---
+# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logging.getLogger('aiogram').setLevel(logging.DEBUG)
@@ -42,7 +42,7 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 load_dotenv()
 
-# --- Конфигурация ---
+# Конфигурация
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен в .env")
@@ -51,7 +51,7 @@ RENDER_URL = os.getenv("RENDER_URL", "").rstrip('/')
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{RENDER_URL}{WEBHOOK_PATH}"
 
-# --- Инициализация ---
+# Инициализация
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 fastapi_app = FastAPI()
@@ -64,7 +64,7 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Модели Pydantic для API ---
+# Модели Pydantic для API
 class HistoryDayStats(BaseModel):
     date: str
     screen_time_goal: int
@@ -76,6 +76,7 @@ class HistoryDayStats(BaseModel):
     planning_done: int
     stretching_done: int
     reflection_done: int
+    walk_done: int
     is_rest_day: bool
 
 class TodayStats(BaseModel):
@@ -96,39 +97,70 @@ class TodayStats(BaseModel):
     stretching_done: int
     reflection_planned: int
     reflection_done: int
+    walk_planned: int
+    walk_done: int
     morning_poll_completed: bool
     is_rest_day: bool
+    habits: Dict[str, bool] = {}
+    productivity_questions: Dict[str, str] = {}
+
+class Goal(BaseModel):
+    id: int
+    goal_name: str
+    goal_type: str
+    target_value: int
+    current_value: int
+    start_date: str
+    end_date: str
+    is_completed: bool
 
 class UserStatsResponse(BaseModel):
     user_id: int
     today: TodayStats
     history: List[HistoryDayStats]
+    goals: List[Goal]
+    habits: List[Dict[str, str]]
 
-# --- FSM для логирования активности ---
+# FSM состояния
 class LogActivity(StatesGroup):
     choosing_type = State()
     choosing_activity_name = State()
     choosing_duration = State()
 
-# --- FSM для утреннего опроса ---
 class MorningPoll(StatesGroup):
     choosing_day_type = State()
 
-# --- FSM для записи спортивных достижений ---
 class SportAchievement(StatesGroup):
     choosing_date = State()
     choosing_description = State()
 
-# --- Глобальное хранилище планов ---
-user_plans: Dict[int, Dict[str, Optional[int]]] = {}
+class SetGoal(StatesGroup):
+    choosing_goal_type = State()
+    choosing_goal_name = State()
+    choosing_target_value = State()
+    choosing_duration = State()
 
-# --- Логирование ошибок завершения ---
+class AddHabit(StatesGroup):
+    choosing_habit_name = State()
+
+class EveningHabitPoll(StatesGroup):
+    answering_habit = State()
+
+class ProductivityPoll(StatesGroup):
+    answering_question = State()
+
+# Глобальное хранилище
+user_plans: Dict[int, Dict[str, Optional[int]]] = {}
+user_habit_answers: Dict[int, Dict[str, bool]] = {}
+user_productivity_answers: Dict[int, Dict[str, str]] = {}
+
+# Логирование ошибок
 def log_uncaught_exceptions(exctype, value, tb):
     logger.error("Uncaught exception", exc_info=(exctype, value, tb))
 
 sys.excepthook = log_uncaught_exceptions
 
-# --- Обработчик сигналов для graceful shutdown ---
+# Обработчик сигналов
 def handle_shutdown(signum, frame):
     logger.warning(f"Received signal {signum}, initiating graceful shutdown...")
     logger.info("Skipping webhook deletion to maintain 24/7 operation")
@@ -136,7 +168,7 @@ def handle_shutdown(signum, frame):
 signal.signal(signal.SIGTERM, handle_shutdown)
 signal.signal(signal.SIGINT, handle_shutdown)
 
-# --- Обработчики Telegram ---
+# Telegram handlers
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     logger.info(f"Received /start from user_id: {message.from_user.id}")
@@ -177,6 +209,26 @@ async def cmd_achievements(message: Message):
         await message.answer("Что вы хотите сделать с достижениями?", reply_markup=keyboards.get_achievements_menu_keyboard())
     except Exception as e:
         logger.error(f"Error in /achievements for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message(Command("goals"))
+async def cmd_goals(message: Message, state: FSMContext):
+    logger.info(f"Received /goals from user_id: {message.from_user.id}")
+    try:
+        await state.clear()
+        await message.answer("Что вы хотите сделать с целями?", reply_markup=keyboards.get_goals_menu_keyboard())
+    except Exception as e:
+        logger.error(f"Error in /goals for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message(Command("habits"))
+async def cmd_habits(message: Message, state: FSMContext):
+    logger.info(f"Received /habits from user_id: {message.from_user.id}")
+    try:
+        await state.clear()
+        await message.answer("Что вы хотите сделать с привычками?", reply_markup=keyboards.get_habits_menu_keyboard())
+    except Exception as e:
+        logger.error(f"Error in /habits for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
 @dp.callback_query(lambda c: c.data == "menu_achievements")
@@ -277,6 +329,218 @@ async def achievement_description_chosen(message: Message, state: FSMContext):
         logger.error(f"Error in achievement_description_chosen for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
+@dp.callback_query(lambda c: c.data == "menu_goals")
+async def cq_goals_menu(callback: CallbackQuery):
+    logger.info(f"Received callback menu_goals from user_id: {callback.from_user.id}")
+    try:
+        await callback.message.edit_text("Что вы хотите сделать с целями?", reply_markup=keyboards.get_goals_menu_keyboard())
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in menu_goals for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data == "goals_view")
+async def cq_view_goals(callback: CallbackQuery):
+    logger.info(f"Received callback goals_view from user_id: {callback.from_user.id}")
+    try:
+        with db.get_db() as db_session:
+            stmt = text("SELECT * FROM goals WHERE user_id = :uid AND is_completed = false ORDER BY start_date")
+            goals = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            if not goals:
+                await callback.message.edit_text(
+                    "🎯 У вас пока нет активных целей. Добавьте первую!",
+                    reply_markup=keyboards.get_goals_menu_keyboard()
+                )
+                await callback.answer()
+                return
+            goal_lines = ["🎯 Ваши цели:\n"]
+            for goal in goals:
+                progress = (goal.current_value / goal.target_value * 100) if goal.target_value > 0 else 0
+                goal_lines.append(f"• {goal.goal_name} ({goal.goal_type}): {goal.current_value}/{goal.target_value} ({progress:.1f}%)")
+            await callback.message.edit_text(
+                "\n".join(goal_lines),
+                reply_markup=keyboards.get_goals_menu_keyboard()
+            )
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in goals_view for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке целей. Попробуйте позже.",
+            reply_markup=keyboards.get_goals_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "goals_add", StateFilter("*"))
+async def cq_add_goal(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback goals_add from user_id: {callback.from_user.id}")
+    try:
+        await state.clear()
+        await callback.message.edit_text(
+            "Выберите тип цели:", 
+            reply_markup=keyboards.get_goal_type_keyboard()
+        )
+        await state.set_state(SetGoal.choosing_goal_type)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in goals_add for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data.startswith("goal_type_"), StateFilter(SetGoal.choosing_goal_type))
+async def goal_type_chosen(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Goal type chosen by user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        goal_type = callback.data.split('_')[2]
+        await state.update_data(goal_type=goal_type)
+        await callback.message.edit_text(
+            "Введите название цели (например, 'Прочитать 5 книг'):", 
+            reply_markup=keyboards.get_cancel_keyboard()
+        )
+        await state.set_state(SetGoal.choosing_goal_name)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in goal_type_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
+
+@dp.message(StateFilter(SetGoal.choosing_goal_name))
+async def goal_name_chosen(message: Message, state: FSMContext):
+    logger.info(f"Goal name chosen by user_id: {message.from_user.id}: {message.text}")
+    try:
+        await state.update_data(goal_name=message.text.strip())
+        await message.answer("Введите целевое значение (например, 5 для 5 книг):", reply_markup=keyboards.get_cancel_keyboard())
+        await state.set_state(SetGoal.choosing_target_value)
+    except Exception as e:
+        logger.error(f"Error in goal_name_chosen for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message(StateFilter(SetGoal.choosing_target_value))
+async def goal_target_chosen(message: Message, state: FSMContext):
+    logger.info(f"Goal target chosen by user_id: {message.from_user.id}: {message.text}")
+    try:
+        if not message.text.isdigit():
+            await message.answer("Ошибка. Введите число.", reply_markup=keyboards.get_cancel_keyboard())
+            return
+        await state.update_data(target_value=int(message.text))
+        await message.answer("Выберите длительность цели:", reply_markup=keyboards.get_goal_duration_keyboard())
+        await state.set_state(SetGoal.choosing_duration)
+    except Exception as e:
+        logger.error(f"Error in goal_target_chosen for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.callback_query(lambda c: c.data.startswith("goal_duration_"), StateFilter(SetGoal.choosing_duration))
+async def goal_duration_chosen(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Goal duration chosen by user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        duration = callback.data.split('_')[2]
+        user_data = await state.get_data()
+        goal_type = user_data.get('goal_type')
+        goal_name = user_data.get('goal_name')
+        target_value = user_data.get('target_value')
+        start_date = date.today()
+        end_date = start_date + timedelta(days=7 if goal_type == 'weekly' else 30)
+        db.add_goal(
+            user_id=callback.from_user.id,
+            goal_name=goal_name,
+            goal_type=goal_type,
+            target_value=target_value,
+            current_value=0,
+            start_date=start_date,
+            end_date=end_date
+        )
+        await callback.message.edit_text(
+            f"🎯 Цель '{goal_name}' ({goal_type}) добавлена! Целевое значение: {target_value}, до {end_date.strftime('%d.%m.%Y')}",
+            reply_markup=keyboards.get_goals_menu_keyboard()
+        )
+        await state.clear()
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in goal_duration_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data == "menu_habits")
+async def cq_habits_menu(callback: CallbackQuery):
+    logger.info(f"Received callback menu_habits from user_id: {callback.from_user.id}")
+    try:
+        await callback.message.edit_text("Что вы хотите сделать с привычками?", reply_markup=keyboards.get_habits_menu_keyboard())
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in menu_habits for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data == "habits_add", StateFilter("*"))
+async def cq_add_habit(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback habits_add from user_id: {callback.from_user.id}")
+    try:
+        await state.clear()
+        await callback.message.edit_text(
+            "Введите название привычки (например, 'Читать 30 минут'):", 
+            reply_markup=keyboards.get_cancel_keyboard()
+        )
+        await state.set_state(AddHabit.choosing_habit_name)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in habits_add for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.message(StateFilter(AddHabit.choosing_habit_name))
+async def habit_name_chosen(message: Message, state: FSMContext):
+    logger.info(f"Habit name chosen by user_id: {message.from_user.id}: {message.text}")
+    try:
+        habit_name = message.text.strip()
+        db.add_habit(message.from_user.id, habit_name)
+        await message.answer(
+            f"✅ Привычка '{habit_name}' добавлена!",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        await state.clear()
+        await message.answer("Что вы хотите сделать с привычками?", reply_markup=keyboards.get_habits_menu_keyboard())
+    except Exception as e:
+        logger.error(f"Error in habit_name_chosen for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.callback_query(lambda c: c.data == "habits_view")
+async def cq_view_habits(callback: CallbackQuery):
+    logger.info(f"Received callback habits_view from user_id: {callback.from_user.id}")
+    try:
+        with db.get_db() as db_session:
+            stmt = text("SELECT habit_name FROM habits WHERE user_id = :uid")
+            habits = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            if not habits:
+                await callback.message.edit_text(
+                    "📋 У вас пока нет привычек. Добавьте первую!",
+                    reply_markup=keyboards.get_habits_menu_keyboard()
+                )
+                await callback.answer()
+                return
+            habit_lines = ["📋 Ваши привычки:\n"]
+            for habit in habits:
+                habit_lines.append(f"• {habit.habit_name}")
+            await callback.message.edit_text(
+                "\n".join(habit_lines),
+                reply_markup=keyboards.get_habits_menu_keyboard()
+            )
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in habits_view for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке привычек. Попробуйте позже.",
+            reply_markup=keyboards.get_habits_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.message(Command("tips"))
+async def cmd_tips(message: Message):
+    logger.info(f"Received /tips from user_id: {message.from_user.id}")
+    try:
+        tips = db.get_random_tip()
+        if not tips:
+            await message.answer("Советов пока нет. Добавьте их в коде!")
+            return
+        category, tip = tips
+        await message.answer(f"💡 {category}: {tip}")
+    except Exception as e:
+        logger.error(f"Error in /tips for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
 @dp.callback_query(lambda c: c.data == "menu_settings")
 async def cq_menu_settings(callback: CallbackQuery):
     logger.info(f"Received callback menu_settings from user_id: {callback.from_user.id}")
@@ -332,6 +596,7 @@ async def cq_mark_activity_done(callback: CallbackQuery):
     logger.info(f"Marking activity {activity_type} for user_id: {callback.from_user.id}")
     try:
         db.mark_activity_done(callback.from_user.id, activity_type)
+        db.update_goal_progress(callback.from_user.id, activity_type, 1)
         await callback.answer(f"✅ {activity_type.capitalize()} засчитано!", show_alert=True)
     except Exception as e:
         logger.error(f"Error marking activity {activity_type} for user_id {callback.from_user.id}: {e}")
@@ -412,7 +677,7 @@ async def start_log_activity(update: Message | CallbackQuery, state: FSMContext)
 async def activity_type_chosen(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Activity type chosen by user_id: {callback.from_user.id}: {callback.data}")
     try:
-        activity_type = callback.data.split('_')[2]  # screen или productive
+        activity_type = callback.data.split('_')[2]
         await state.update_data(activity_type=activity_type)
         await callback.message.edit_text(
             f"Какую {'не полезную' if activity_type == 'screen' else 'полезную'} активность вы хотите записать? (например: {'YouTube, Соцсети' if activity_type == 'screen' else 'Чтение, Работа'})",
@@ -472,7 +737,7 @@ async def cmd_morning(message: Message, state: FSMContext):
             if result and result._asdict()['morning_poll_completed']:
                 await message.answer("☀️ Утренний опрос уже завершен сегодня. Используй /menu для других действий.", reply_markup=types.ReplyKeyboardRemove())
                 return
-            if result and result._asdict()['is_rest_day']:
+            if result and result._asdict==['is_rest_day']:
                 await message.answer("🏖️ Сегодня день отдыха. Хорошего отдыха, командир!", reply_markup=types.ReplyKeyboardRemove())
                 return
         await state.clear()
@@ -488,7 +753,7 @@ async def cmd_morning(message: Message, state: FSMContext):
 async def day_type_chosen(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Day type chosen by user_id: {callback.from_user.id}: {callback.data}")
     try:
-        day_type = callback.data.split('_')[2]  # rest или workday
+        day_type = callback.data.split('_')[2]
         if day_type == 'rest':
             db.save_morning_plan(
                 user_id=callback.from_user.id,
@@ -654,14 +919,13 @@ async def handle_morning_plan(callback: CallbackQuery):
                 del user_plans[user_id]
                 await callback.message.edit_text("⚔️ План на день сохранён. Продуктивного дня, командир!")
                 await callback.answer()
-                return  # Выходим, чтобы не вызывать edit_text ниже
+                return
             except Exception as e:
                 logger.error(f"Error saving morning plan for user_id {user_id}: {e}")
                 await callback.message.edit_text("⚠️ Ошибка сохранения плана. Попробуйте позже.")
                 db_session.rollback()
                 await callback.answer()
                 return
-        # Обновляем сообщение с текущим состоянием плана
         plan = user_plans[user_id]
         time_text = f"{plan['time'] // 60}ч" if plan['time'] else "не выбрано"
         activities = [
@@ -692,7 +956,86 @@ async def handle_morning_plan(callback: CallbackQuery):
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
         await callback.answer()
 
-# --- API для веб-приложения ---
+@dp.callback_query(lambda c: c.data.startswith("habit_answer_"), StateFilter(EveningHabitPoll.answering_habit))
+async def handle_habit_answer(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Habit answer received from user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        user_id = callback.from_user.id
+        habit_id, answer = callback.data.split('_')[2:4]
+        habit_id = int(habit_id)
+        is_completed = answer == 'yes'
+        if user_id not in user_habit_answers:
+            user_habit_answers[user_id] = {}
+        user_habit_answers[user_id][habit_id] = is_completed
+        with db.get_db() as db_session:
+            stmt = text("SELECT habit_name, id FROM habits WHERE user_id = :uid AND id > :current_id ORDER BY id LIMIT 1")
+            next_habit = db_session.execute(stmt, {'uid': user_id, 'current_id': habit_id}).first()
+            if next_habit:
+                habit_name, next_habit_id = next_habit
+                await callback.message.edit_text(
+                    f"📋 Выполнили ли вы привычку '{habit_name}' сегодня?",
+                    reply_markup=keyboards.get_habit_answer_keyboard(next_habit_id)
+                )
+                await callback.answer()
+            else:
+                for h_id, completed in user_habit_answers[user_id].items():
+                    db.log_habit_completion(user_id, int(h_id), completed)
+                del user_habit_answers[user_id]
+                await callback.message.edit_text(
+                    "🌙 Все привычки отмечены! Переходим к вопросам продуктивности.",
+                    reply_markup=None
+                )
+                # Запуск опроса продуктивности
+                questions = [
+                    "Что сегодня мешало быть продуктивным?",
+                    "Что дало тебе силу двигаться?",
+                    "Что ты сделаешь завтра лучше?"
+                ]
+                user_productivity_answers[user_id] = {}
+                await state.set_state(ProductivityPoll.answering_question)
+                await state.update_data(current_question=0, questions=questions)
+                await callback.message.answer(
+                    questions[0],
+                    reply_markup=keyboards.get_cancel_keyboard()
+                )
+                await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in handle_habit_answer for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
+
+@dp.message(StateFilter(ProductivityPoll.answering_question))
+async def handle_productivity_answer(message: Message, state: FSMContext):
+    logger.info(f"Productivity answer received from user_id: {message.from_user.id}: {message.text}")
+    try:
+        user_id = message.from_user.id
+        user_data = await state.get_data()
+        current_question_idx = user_data.get('current_question', 0)
+        questions = user_data.get('questions', [])
+        if user_id not in user_productivity_answers:
+            user_productivity_answers[user_id] = {}
+        user_productivity_answers[user_id][questions[current_question_idx]] = message.text.strip()
+        if current_question_idx + 1 < len(questions):
+            await state.update_data(current_question=current_question_idx + 1)
+            await message.answer(
+                questions[current_question_idx + 1],
+                reply_markup=keyboards.get_cancel_keyboard()
+            )
+        else:
+            with db.get_db() as db_session:
+                for question, answer in user_productivity_answers[user_id].items():
+                    db.save_productivity_answer(user_id, question, answer)
+                db_session.commit()
+            del user_productivity_answers[user_id]
+            await message.answer(
+                "🌙 Все вопросы продуктивности отмечены! Спасибо за продуктивный день, командир!",
+                reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+            )
+            await state.clear()
+    except Exception as e:
+        logger.error(f"Error in handle_productivity_answer for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+# API endpoints
 @fastapi_app.get("/api/stats/{user_id}", response_model=UserStatsResponse)
 async def read_user_stats(user_id: int):
     logger.info(f"API request for stats, user_id: {user_id}")
@@ -708,17 +1051,42 @@ async def read_user_stats(user_id: int):
             
             today_main_stats_dict = today_main_stats._asdict()
             
-            # Запрос на экранные активности за сегодня
             stmt = text("SELECT activity_name, duration_minutes FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
             today_screen_activities = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
             screen_breakdown = {row._asdict()['activity_name']: row._asdict()['duration_minutes'] for row in today_screen_activities}
             total_screen_minutes_today = sum(screen_breakdown.values())
             
-            # Запрос на полезные активности за сегодня
             stmt = text("SELECT activity_name, duration_minutes FROM productive_activities WHERE user_id = :uid AND activity_date = :today")
             today_productive_activities = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
             productive_breakdown = {row._asdict()['activity_name']: row._asdict()['duration_minutes'] for row in today_productive_activities}
             total_productive_minutes_today = sum(productive_breakdown.values())
+            
+            stmt = text("SELECT habit_name, completed FROM habit_completions WHERE user_id = :uid AND completion_date = :today")
+            today_habits = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
+            habits = {row._asdict()['habit_name']: row._asdict()['completed'] for row in today_habits}
+            
+            stmt = text("SELECT question, answer FROM productivity_questions WHERE user_id = :uid AND answer_date = :today")
+            productivity_questions = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
+            productivity_answers = {row._asdict()['question']: row._asdict()['answer'] for row in productivity_questions}
+            
+            stmt = text("SELECT * FROM goals WHERE user_id = :uid AND is_completed = false")
+            goals = db_session.execute(stmt, {'uid': user_id}).fetchall()
+            goals_data = [
+                Goal(
+                    id=goal.id,
+                    goal_name=goal.goal_name,
+                    goal_type=goal.goal_type,
+                    target_value=goal.target_value,
+                    current_value=goal.current_value,
+                    start_date=goal.start_date.isoformat(),
+                    end_date=goal.end_date.isoformat(),
+                    is_completed=goal.is_completed
+                ) for goal in goals
+            ]
+            
+            stmt = text("SELECT habit_name, id FROM habits WHERE user_id = :uid")
+            user_habits = db_session.execute(stmt, {'uid': user_id}).fetchall()
+            habits_data = [{'id': habit.id, 'name': habit.habit_name} for habit in user_habits]
             
             today_data = TodayStats(
                 screen_time_goal=today_main_stats_dict['screen_time_goal'],
@@ -738,8 +1106,12 @@ async def read_user_stats(user_id: int):
                 stretching_done=today_main_stats_dict['stretching_done'],
                 reflection_planned=today_main_stats_dict['reflection_planned'],
                 reflection_done=today_main_stats_dict['reflection_done'],
+                walk_planned=today_main_stats_dict['walk_planned'],
+                walk_done=today_main_stats_dict['walk_done'],
                 morning_poll_completed=today_main_stats_dict['morning_poll_completed'],
-                is_rest_day=today_main_stats_dict['is_rest_day']
+                is_rest_day=today_main_stats_dict['is_rest_day'],
+                habits=habits,
+                productivity_questions=productivity_answers
             )
             
             seven_days_ago = today - timedelta(days=7)
@@ -766,6 +1138,7 @@ async def read_user_stats(user_id: int):
                     planning_done=day_stats._asdict()['planning_done'],
                     stretching_done=day_stats._asdict()['stretching_done'],
                     reflection_done=day_stats._asdict()['reflection_done'],
+                    walk_done=day_stats._asdict()['walk_done'],
                     is_rest_day=day_stats._asdict()['is_rest_day']
                 )
                 for day_stats in history_main_stats
@@ -773,7 +1146,7 @@ async def read_user_stats(user_id: int):
             
             db_session.commit()
             
-            return UserStatsResponse(user_id=user_id, today=today_data, history=history_data)
+            return UserStatsResponse(user_id=user_id, today=today_data, history=history_data, goals=goals_data, habits=habits_data)
     except HTTPException as e:
         logger.error(f"HTTPException in /api/stats/{user_id}: {e}")
         raise
@@ -810,7 +1183,6 @@ async def morning_poll_cron():
                     if result and (result._asdict()['morning_poll_completed'] or result._asdict()['is_rest_day']):
                         logger.info(f"Skipping morning poll for user_id: {user_id}, already completed or rest day")
                         continue
-                    # Инициализация FSM
                     dp.storage.set_state(chat_id=user_id, user_id=user_id, state=MorningPoll.choosing_day_type)
                     await bot.send_message(
                         user_id,
@@ -871,8 +1243,35 @@ async def evening_summary_cron():
                         f"🧘 Растяжка: {get_status(stats['stretching_planned'], stats['stretching_done'])}",
                         f"🤔 Размышление: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
                         f"🚶 Прогулка: {get_status(stats['walk_planned'], stats['walk_done'])}",
+                        "\n📋 Ваши привычки:",
+                    ])
+                    habit_stmt = text("SELECT habit_name, completed FROM habit_completions WHERE user_id = :uid AND completion_date = :today")
+                    habits = db_session.execute(habit_stmt, {'uid': user_id, 'today': date.today()}).fetchall()
+                    if habits:
+                        for habit in habits:
+                            status = "✅ Выполнено!" if habit.completed else "❌ Пропущено"
+                            summary_lines.append(f"• {habit.habit_name}: {status}")
+                    else:
+                        summary_lines.append("• Нет данных о привычках за сегодня.")
+                    summary_lines.extend([
+                        "\n🤔 Вопросы для размышления:",
+                        "1. Что сегодня мешало быть продуктивным?",
+                        "2. Что дало тебе силу двигаться?",
+                        "3. Что ты сделаешь завтра лучше?"
                     ])
                     await bot.send_message(user_id, "\n".join(summary_lines))
+                    db.check_and_award_achievements(user_id)
+                    habit_stmt = text("SELECT habit_name, id FROM habits WHERE user_id = :uid ORDER BY id LIMIT 1")
+                    first_habit = db_session.execute(habit_stmt, {'uid': user_id}).first()
+                    if first_habit:
+                        user_habit_answers[user_id] = {}
+                        habit_name, habit_id = first_habit
+                        dp.storage.set_state(chat_id=user_id, user_id=user_id, state=EveningHabitPoll.answering_habit)
+                        await bot.send_message(
+                            user_id,
+                            f"📋 Выполнили ли вы привычку '{habit_name}' сегодня?",
+                            reply_markup=keyboards.get_habit_answer_keyboard(habit_id)
+                        )
                     logger.info(f"Sent evening summary to user_id: {user_id}")
                 except TelegramAPIError as e:
                     logger.error(f"Failed to send evening summary to user_id {user_id}: {e}")
