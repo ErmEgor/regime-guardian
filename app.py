@@ -149,6 +149,10 @@ class EveningHabitPoll(StatesGroup):
 class ProductivityPoll(StatesGroup):
     answering_question = State()
 
+class TipsSelection(StatesGroup):
+    choosing_category = State()
+    choosing_tip = State()
+
 # Глобальное хранилище
 user_plans: Dict[int, Dict[str, Optional[int]]] = {}
 user_habit_answers: Dict[int, Dict[str, bool]] = {}
@@ -229,6 +233,17 @@ async def cmd_habits(message: Message, state: FSMContext):
         await message.answer("Что вы хотите сделать с привычками?", reply_markup=keyboards.get_habits_menu_keyboard())
     except Exception as e:
         logger.error(f"Error in /habits for user_id {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message(Command("tips"))
+async def cmd_tips(message: Message, state: FSMContext):
+    logger.info(f"Received /tips from user_id: {message.from_user.id}")
+    try:
+        await state.clear()
+        await message.answer("Выберите категорию советов:", reply_markup=keyboards.get_tips_categories_keyboard())
+        await state.set_state(TipsSelection.choosing_category)
+    except Exception as e:
+        logger.error(f"Error in /tips for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
 @dp.callback_query(lambda c: c.data == "menu_achievements")
@@ -502,8 +517,7 @@ async def cq_view_habits(callback: CallbackQuery):
     logger.info(f"Received callback habits_view from user_id: {callback.from_user.id}")
     try:
         with db.get_db() as db_session:
-            stmt = text("SELECT habit_name FROM habits WHERE user_id = :uid")
-            habits = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            habits = db.get_habits_with_progress(callback.from_user.id)
             if not habits:
                 await callback.message.edit_text(
                     "📋 У вас пока нет привычек. Добавьте первую!",
@@ -513,7 +527,7 @@ async def cq_view_habits(callback: CallbackQuery):
                 return
             habit_lines = ["📋 Ваши привычки:\n"]
             for habit in habits:
-                habit_lines.append(f"• {habit.habit_name}")
+                habit_lines.append(f"• {habit['name']} ({habit['progress']:.1f}%)")
             await callback.message.edit_text(
                 "\n".join(habit_lines),
                 reply_markup=keyboards.get_habits_menu_keyboard()
@@ -527,29 +541,67 @@ async def cq_view_habits(callback: CallbackQuery):
         )
         await callback.answer()
 
-@dp.message(Command("tips"))
-async def cmd_tips(message: Message):
-    logger.info(f"Received /tips from user_id: {message.from_user.id}")
+@dp.callback_query(lambda c: c.data == "menu_tips", StateFilter("*"))
+async def cq_tips_menu(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback menu_tips from user_id: {callback.from_user.id}")
     try:
-        tips = db.get_random_tip()
-        if not tips:
-            await message.answer("Советов пока нет. Добавьте их в коде!")
-            return
-        category, tip = tips
-        await message.answer(f"💡 {category}: {tip}")
-    except Exception as e:
-        logger.error(f"Error in /tips for user_id {message.from_user.id}: {e}")
-        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
-
-@dp.callback_query(lambda c: c.data == "menu_settings")
-async def cq_menu_settings(callback: CallbackQuery):
-    logger.info(f"Received callback menu_settings from user_id: {callback.from_user.id}")
-    try:
-        await callback.message.edit_text("Меню настроек:", reply_markup=keyboards.get_settings_keyboard("Asia/Almaty"))
+        await state.clear()
+        await callback.message.edit_text("Выберите категорию советов:", reply_markup=keyboards.get_tips_categories_keyboard())
+        await state.set_state(TipsSelection.choosing_category)
         await callback.answer()
     except Exception as e:
-        logger.error(f"Error in menu_settings for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
+        logger.error(f"Error in menu_tips for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data.startswith("tip_category_"), StateFilter(TipsSelection.choosing_category))
+async def cq_tip_category_chosen(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Tip category chosen by user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        category = callback.data.split('_')[2]
+        await state.update_data(category=category)
+        tips = db.get_tips_by_category(category)
+        if not tips:
+            await callback.message.edit_text(
+                f"Советов в категории '{category}' пока нет.",
+                reply_markup=keyboards.get_tips_categories_keyboard()
+            )
+            await callback.answer()
+            return
+        await callback.message.edit_text(
+            f"Советы в категории '{category}':",
+            reply_markup=keyboards.get_tips_by_category_keyboard(tips)
+        )
+        await state.set_state(TipsSelection.choosing_tip)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in tip_category_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+
+@dp.callback_query(lambda c: c.data.startswith("tip_"), StateFilter(TipsSelection.choosing_tip))
+async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Tip chosen by user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        tip_id = int(callback.data.split('_')[1])
+        user_data = await state.get_data()
+        category = user_data.get('category')
+        with db.get_db() as db_session:
+            stmt = text("SELECT tip FROM tips WHERE id = :tip_id")
+            tip = db_session.execute(stmt, {'tip_id': tip_id}).first()
+            if not tip:
+                await callback.message.edit_text(
+                    "Совет не найден.",
+                    reply_markup=keyboards.get_tips_categories_keyboard()
+                )
+                await callback.answer()
+                return
+            await callback.message.edit_text(
+                f"💡 {category}: {tip.tip}",
+                reply_markup=keyboards.get_tip_content_keyboard(category)
+            )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in tip_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
 
 @dp.callback_query(lambda c: c.data == "menu_mark_done")
 async def cq_mark_done_menu(callback: CallbackQuery):
@@ -737,7 +789,7 @@ async def cmd_morning(message: Message, state: FSMContext):
             if result and result._asdict()['morning_poll_completed']:
                 await message.answer("☀️ Утренний опрос уже завершен сегодня. Используй /menu для других действий.", reply_markup=types.ReplyKeyboardRemove())
                 return
-            if result and result._asdict==['is_rest_day']:
+            if result and result._asdict()['is_rest_day']:
                 await message.answer("🏖️ Сегодня день отдыха. Хорошего отдыха, командир!", reply_markup=types.ReplyKeyboardRemove())
                 return
         await state.clear()
@@ -1061,7 +1113,13 @@ async def read_user_stats(user_id: int):
             productive_breakdown = {row._asdict()['activity_name']: row._asdict()['duration_minutes'] for row in today_productive_activities}
             total_productive_minutes_today = sum(productive_breakdown.values())
             
-            stmt = text("SELECT habit_name, completed FROM habit_completions WHERE user_id = :uid AND completion_date = :today")
+            # Исправленный запрос для привычек
+            stmt = text("""
+                SELECT h.habit_name, hc.completed
+                FROM habit_completions hc
+                JOIN habits h ON hc.habit_id = h.id
+                WHERE hc.user_id = :uid AND hc.completion_date = :today
+            """)
             today_habits = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
             habits = {row._asdict()['habit_name']: row._asdict()['completed'] for row in today_habits}
             
@@ -1245,7 +1303,12 @@ async def evening_summary_cron():
                         f"🚶 Прогулка: {get_status(stats['walk_planned'], stats['walk_done'])}",
                         "\n📋 Ваши привычки:",
                     ])
-                    habit_stmt = text("SELECT habit_name, completed FROM habit_completions WHERE user_id = :uid AND completion_date = :today")
+                    habit_stmt = text("""
+                        SELECT h.habit_name, hc.completed
+                        FROM habit_completions hc
+                        JOIN habits h ON hc.habit_id = h.id
+                        WHERE hc.user_id = :uid AND hc.completion_date = :today
+                    """)
                     habits = db_session.execute(habit_stmt, {'uid': user_id, 'today': date.today()}).fetchall()
                     if habits:
                         for habit in habits:
