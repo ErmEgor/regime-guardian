@@ -547,7 +547,7 @@ async def cq_view_habits(callback: CallbackQuery):
                 return
             habit_lines = ["📋 Ваши привычки:\n"]
             for habit in habits:
-                streak_text = f"{habit['streak']} {'день' if habit['streak'] % 10 == 1 and habit['streak'] != 11 else 'дней'}" if habit['streak'] > 0 else "нет стрика"
+                streak_text = f"{habit['streak']} {'день подряд' if habit['streak'] % 10 == 1 and habit['streak'] != 11 else 'дней подряд'}" if habit['streak'] > 0 else "0 дней подряд"
                 habit_lines.append(f"• {habit['name']} ({streak_text})")
             await callback.message.edit_text(
                 "\n".join(habit_lines),

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError, IntegrityError
 import random
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -626,22 +626,48 @@ def get_today_screen_time(user_id: int):
         raise
 
 def clear_user_data(user_id: int):
+    """
+    Очищает все данные пользователя из всех связанных таблиц.
+    Проверяет существование таблиц перед выполнением запросов.
+    Учитывает порядок удаления для соблюдения ссылочной целостности.
+    """
     try:
         with get_db() as db:
-            db.execute(text("DELETE FROM daily_stats WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM sport_achievements WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM screen_activities WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM productive_activities WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM goal_completions WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM goals WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM habit_completions WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM habits WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM productivity_questions WHERE user_id = :user_id"), {'user_id': user_id})
-            db.execute(text("DELETE FROM users WHERE user_id = :user_id"), {'user_id': user_id})
+            # Список таблиц в порядке, учитывающем зависимости (сначала дочерние, затем родительские)
+            tables: List[Tuple[str, str]] = [
+                ('habit_completions', 'DELETE FROM habit_completions WHERE user_id = :user_id'),
+                ('goal_completions', 'DELETE FROM goal_completions WHERE user_id = :user_id'),
+                ('daily_stats', 'DELETE FROM daily_stats WHERE user_id = :user_id'),
+                ('sport_achievements', 'DELETE FROM sport_achievements WHERE user_id = :user_id'),
+                ('screen_activities', 'DELETE FROM screen_activities WHERE user_id = :user_id'),
+                ('productive_activities', 'DELETE FROM productive_activities WHERE user_id = :user_id'),
+                ('productivity_questions', 'DELETE FROM productivity_questions WHERE user_id = :user_id'),
+                ('habits', 'DELETE FROM habits WHERE user_id = :user_id'),
+                ('goals', 'DELETE FROM goals WHERE user_id = :user_id'),
+                ('users', 'DELETE FROM users WHERE user_id = :user_id'),
+            ]
+
+            # Проверка и удаление данных из каждой таблицы
+            for table_name, delete_query in tables:
+                # Проверяем, существует ли таблица
+                check_table_query = text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = :table_name
+                    )
+                """)
+                table_exists = db.execute(check_table_query, {'table_name': table_name}).scalar()
+
+                if table_exists:
+                    db.execute(text(delete_query), {'user_id': user_id})
+                    logger.info(f"Deleted data from {table_name} for user_id {user_id}")
+                else:
+                    logger.warning(f"Table {table_name} does not exist, skipping deletion for user_id {user_id}")
+
             db.commit()
-            logger.info(f"Cleared all data for user {user_id}")
+            logger.info(f"Successfully cleared all data for user_id {user_id}")
     except Exception as e:
-        logger.error(f"Error clearing data for user {user_id}: {e}")
+        logger.error(f"Error clearing data for user_id {user_id}: {e}")
         raise
 
 def get_random_tip():
@@ -763,7 +789,7 @@ def get_tips_by_category(category: str) -> List[Dict[str, str]]:
     except Exception as e:
         logger.error(f"Error fetching tips for category {category}: {e}")
         raise
-    
+
 def get_habits_with_progress(user_id: int) -> List[Dict[str, any]]:
     try:
         with get_db() as db:
