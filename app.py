@@ -547,7 +547,8 @@ async def cq_view_habits(callback: CallbackQuery):
                 return
             habit_lines = ["📋 Ваши привычки:\n"]
             for habit in habits:
-                habit_lines.append(f"• {habit['name']} ({habit['progress']:.1f}%)")
+                streak_text = f"{habit['streak']} {'день' if habit['streak'] % 10 == 1 and habit['streak'] != 11 else 'дней'}" if habit['streak'] > 0 else "нет стрика"
+                habit_lines.append(f"• {habit['name']} ({streak_text})")
             await callback.message.edit_text(
                 "\n".join(habit_lines),
                 reply_markup=keyboards.get_habits_menu_keyboard()

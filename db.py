@@ -659,27 +659,96 @@ def get_random_tip():
 def check_and_award_achievements(user_id: int):
     try:
         with get_db() as db:
-            # Проверка достижения "5 тренировок подряд"
-            stmt = text("""
-                SELECT COUNT(*) as streak
-                FROM daily_stats
-                WHERE user_id = :user_id
-                AND stat_date > :start_date
-                AND workout_done = 1
-                AND is_rest_day = false
-            """)
-            streak = db.execute(stmt, {'user_id': user_id, 'start_date': date.today() - timedelta(days=5)}).first().streak
-            if streak >= 5:
-                db.execute(text("""
-                    INSERT INTO sport_achievements (user_id, achievement_name, date_earned)
-                    VALUES (:user_id, :achievement_name, :date_earned)
-                    ON CONFLICT DO NOTHING
-                """), {
-                    'user_id': user_id,
-                    'achievement_name': '5 тренировок подряд',
-                    'date_earned': date.today()
-                })
-                logger.info(f"Awarded '5 workouts streak' achievement to user {user_id}")
+            today = date.today()
+            # Периоды для проверки стрика
+            streak_periods = [3, 7, 14, 30]
+
+            # 1. Достижение: Выполнение всех главных активностей
+            activities = ['workout', 'english', 'coding', 'planning', 'stretching', 'reflection', 'walk']
+            for days in streak_periods:
+                start_date = today - timedelta(days=days)
+                stmt = text("""
+                    SELECT stat_date
+                    FROM daily_stats
+                    WHERE user_id = :user_id
+                    AND stat_date > :start_date
+                    AND stat_date <= :today
+                    AND is_rest_day = false
+                    AND (
+                        (workout_planned = 0 OR workout_done = 1) AND
+                        (english_planned = 0 OR english_done = 1) AND
+                        (coding_planned = 0 OR coding_done = 1) AND
+                        (planning_planned = 0 OR planning_done = 1) AND
+                        (stretching_planned = 0 OR stretching_done = 1) AND
+                        (reflection_planned = 0 OR reflection_done = 1) AND
+                        (walk_planned = 0 OR walk_done = 1)
+                    )
+                """)
+                completed_days = db.execute(stmt, {'user_id': user_id, 'start_date': start_date, 'today': today}).fetchall()
+                if len(completed_days) >= days:
+                    achievement_name = f"Выполнение всех главных активностей {days} дней"
+                    db.execute(text("""
+                        INSERT INTO sport_achievements (user_id, achievement_name, date_earned)
+                        VALUES (:user_id, :achievement_name, :date_earned)
+                        ON CONFLICT DO NOTHING
+                    """), {
+                        'user_id': user_id,
+                        'achievement_name': achievement_name,
+                        'date_earned': today
+                    })
+                    logger.info(f"Awarded '{achievement_name}' achievement to user {user_id}")
+
+            # 2. Достижение: Держал экранное время в лимите
+            for days in streak_periods:
+                start_date = today - timedelta(days=days)
+                stmt = text("""
+                    SELECT stat_date
+                    FROM daily_stats
+                    WHERE user_id = :user_id
+                    AND stat_date > :start_date
+                    AND stat_date <= :today
+                    AND is_rest_day = false
+                    AND screen_time_actual <= screen_time_goal
+                """)
+                compliant_days = db.execute(stmt, {'user_id': user_id, 'start_date': start_date, 'today': today}).fetchall()
+                if len(compliant_days) >= days:
+                    achievement_name = f"Держал экранное время в лимите {days} дней"
+                    db.execute(text("""
+                        INSERT INTO sport_achievements (user_id, achievement_name, date_earned)
+                        VALUES (:user_id, :achievement_name, :date_earned)
+                        ON CONFLICT DO NOTHING
+                    """), {
+                        'user_id': user_id,
+                        'achievement_name': achievement_name,
+                        'date_earned': today
+                    })
+                    logger.info(f"Awarded '{achievement_name}' achievement to user {user_id}")
+
+            # 3. Достижение: Записывал хотя бы 60 минут полезных активностей
+            for days in streak_periods:
+                start_date = today - timedelta(days=days)
+                stmt = text("""
+                    SELECT pa.activity_date
+                    FROM productive_activities pa
+                    WHERE pa.user_id = :user_id
+                    AND pa.activity_date > :start_date
+                    AND pa.activity_date <= :today
+                    GROUP BY pa.activity_date
+                    HAVING SUM(pa.duration_minutes) >= 60
+                """)
+                productive_days = db.execute(stmt, {'user_id': user_id, 'start_date': start_date, 'today': today}).fetchall()
+                if len(productive_days) >= days:
+                    achievement_name = f"Записывал хотя бы 60 минут полезных активностей {days} дней"
+                    db.execute(text("""
+                        INSERT INTO sport_achievements (user_id, achievement_name, date_earned)
+                        VALUES (:user_id, :achievement_name, :date_earned)
+                        ON CONFLICT DO NOTHING
+                    """), {
+                        'user_id': user_id,
+                        'achievement_name': achievement_name,
+                        'date_earned': today
+                    })
+                    logger.info(f"Awarded '{achievement_name}' achievement to user {user_id}")
             db.commit()
     except Exception as e:
         logger.error(f"Error checking achievements for user {user_id}: {e}")
@@ -694,29 +763,48 @@ def get_tips_by_category(category: str) -> List[Dict[str, str]]:
     except Exception as e:
         logger.error(f"Error fetching tips for category {category}: {e}")
         raise
-
+    
 def get_habits_with_progress(user_id: int) -> List[Dict[str, any]]:
     try:
         with get_db() as db:
             stmt = text("""
-                SELECT h.id, h.habit_name AS name, 
-                       COUNT(hc.completed) FILTER (WHERE hc.completed = true) AS completed_count,
-                       COUNT(hc.completed) AS total_count
-                FROM habits h
-                LEFT JOIN habit_completions hc ON h.id = hc.habit_id AND h.user_id = hc.user_id
-                WHERE h.user_id = :user_id
-                GROUP BY h.id, h.habit_name
+                SELECT id, habit_name AS name
+                FROM habits
+                WHERE user_id = :user_id
             """)
             habits = db.execute(stmt, {'user_id': user_id}).fetchall()
             result = []
             for habit in habits:
-                progress = (habit.completed_count / habit.total_count * 100) if habit.total_count > 0 else 0
+                streak = get_habit_streak(user_id, habit.id)
                 result.append({
                     'id': habit.id,
                     'name': habit.name,
-                    'progress': progress
+                    'streak': streak
                 })
             return result
     except Exception as e:
         logger.error(f"Error fetching habits with progress for user_id {user_id}: {e}")
         raise
+
+def get_habit_streak(user_id: int, habit_id: int) -> int:
+    try:
+        with get_db() as db:
+            today = date.today()
+            streak = 0
+            current_date = today
+            while True:
+                stmt = text("""
+                    SELECT completed
+                    FROM habit_completions
+                    WHERE user_id = :user_id AND habit_id = :habit_id AND completion_date = :date
+                """)
+                result = db.execute(stmt, {'user_id': user_id, 'habit_id': habit_id, 'date': current_date}).first()
+                if not result or not result.completed:
+                    break
+                streak += 1
+                current_date -= timedelta(days=1)
+            return streak
+    except Exception as e:
+        logger.error(f"Error calculating habit streak for user {user_id}, habit {habit_id}: {e}")
+        raise
+
