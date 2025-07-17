@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError, IntegrityError
 import random
-from typing import List, Dict  # Добавляем импорт List и Dict
+from typing import List, Dict
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -175,22 +175,91 @@ def init_db():
                 )
             """))
             
-            # Добавление начальных советов, если таблица пуста
+            # Добавление начальных советов для каждой категории
+            # Чтобы добавить новый совет, используйте следующий формат:
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Категория', 'Текст нового совета'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Категория' AND tip = 'Текст нового совета')
+            # """))
+            
+            # Мотивация
+            db.execute(text("""
+                INSERT INTO tips (category, tip)
+                SELECT 'Мотивация', 'Начните день с визуализации своих целей, чтобы оставаться мотивированным.'
+                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Мотивация')
+            """))
+            # Пример добавления нового совета для категории "Мотивация":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Мотивация', 'Верьте в себя, каждый маленький шаг приближает вас к большой цели.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Мотивация' AND tip = 'Верьте в себя, каждый маленький шаг приближает вас к большой цели.')
+            # """))
+            
+            # Дисциплина
+            db.execute(text("""
+                INSERT INTO tips (category, tip)
+                SELECT 'Дисциплина', 'Создайте утреннюю рутину, чтобы задавать тон продуктивному дню.'
+                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Дисциплина')
+            """))
+            # Пример добавления нового совета для категории "Дисциплина":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Дисциплина', 'Ставьте таймер на задачи, чтобы избежать прокрастинации.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Дисциплина' AND tip = 'Ставьте таймер на задачи, чтобы избежать прокрастинации.')
+            # """))
+            
+            # Фокус
+            db.execute(text("""
+                INSERT INTO tips (category, tip)
+                SELECT 'Фокус', 'Используйте метод Помодоро для поддержания концентрации.'
+                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Фокус')
+            """))
+            # Пример добавления нового совета для категории "Фокус":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Фокус', 'Уберите отвлекающие факторы, такие как телефон, во время работы.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Фокус' AND tip = 'Уберите отвлекающие факторы, такие как телефон, во время работы.')
+            # """))
+            
+            # Спорт
+            db.execute(text("""
+                INSERT INTO tips (category, tip)
+                SELECT 'Спорт', 'Начните с коротких тренировок, чтобы сформировать привычку.'
+                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Спорт')
+            """))
+            # Пример добавления нового совета для категории "Спорт":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Спорт', 'Слушайте энергичную музыку во время тренировок для повышения мотивации.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Спорт' AND tip = 'Слушайте энергичную музыку во время тренировок для повышения мотивации.')
+            # """))
+            
+            # Продуктивность
             db.execute(text("""
                 INSERT INTO tips (category, tip)
                 SELECT 'Продуктивность', 'Ставьте SMART-цели: конкретные, измеримые, достижимые, релевантные и ограниченные по времени.'
                 WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Продуктивность')
             """))
+            # Пример добавления нового совета для категории "Продуктивность":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Продуктивность', 'Планируйте свой день с вечера, чтобы начать утро с ясной целью.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Продуктивность' AND tip = 'Планируйте свой день с вечера, чтобы начать утро с ясной целью.')
+            # """))
+            
+            # Мышление
             db.execute(text("""
                 INSERT INTO tips (category, tip)
-                SELECT 'Здоровье', 'Пейте воду регулярно, чтобы поддерживать концентрацию.'
-                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Здоровье')
+                SELECT 'Мышление', 'Практикуйте осознанность, чтобы лучше понимать свои мысли и эмоции.'
+                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Мышление')
             """))
-            db.execute(text("""
-                INSERT INTO tips (category, tip)
-                SELECT 'Мотивация', 'Разбейте большие задачи на маленькие шаги, чтобы не терять мотивацию.'
-                WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Мотивация')
-            """))
+            # Пример добавления нового совета для категории "Мышление":
+            # db.execute(text("""
+            #     INSERT INTO tips (category, tip)
+            #     SELECT 'Мышление', 'Задавайте себе вопрос "Почему?" для анализа своих решений.'
+            #     WHERE NOT EXISTS (SELECT 1 FROM tips WHERE category = 'Мышление' AND tip = 'Задавайте себе вопрос "Почему?" для анализа своих решений.')
+            # """))
             
             db.commit()
             logger.info("Database initialized successfully")

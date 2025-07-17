@@ -70,7 +70,7 @@ def get_tips_categories_keyboard() -> InlineKeyboardMarkup:
     Создает клавиатуру с категориями советов.
     """
     logger.debug("Creating tips categories keyboard")
-    categories = ["Продуктивность", "Здоровье", "Мотивация", "Саморазвитие"]
+    categories = ["Мотивация", "Дисциплина", "Фокус", "Спорт", "Продуктивность", "Мышление"]
     buttons = [[InlineKeyboardButton(text=category, callback_data=f"tip_category_{category}")] for category in categories]
     buttons.append([InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -81,7 +81,7 @@ def get_tips_by_category_keyboard(tips: List[Dict[str, str]]) -> InlineKeyboardM
     """
     logger.debug("Creating tips by category keyboard")
     buttons = [[InlineKeyboardButton(text=tip['title'], callback_data=f"tip_{tip['id']}")] for tip in tips]
-    buttons.append([InlineKeyboardButton(text="« Назад к категориям", callback_data="category")])  # Исправлено
+    buttons.append([InlineKeyboardButton(text="« Назад к категориям", callback_data="category")])
     buttons.append([InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
