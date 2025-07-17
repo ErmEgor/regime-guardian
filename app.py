@@ -597,11 +597,21 @@ async def cq_tip_category_chosen(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in tip_category_chosen for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
 
-@dp.callback_query(lambda c: c.data.startswith("tip_"), StateFilter(TipsSelection.choosing_tip))
+@dp.callback_query(lambda c: c.data.startswith("tip_") or c.data == "category", StateFilter(TipsSelection.choosing_tip))
 async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Tip chosen by user_id: {callback.from_user.id}: {callback.data}")
     try:
-        tip_id = int(callback.data.split('_')[1])
+        if callback.data == 'category':
+            # Возвращаем пользователя к списку категорий
+            await callback.message.edit_text(
+                "Выберите категорию совета:",
+                reply_markup=keyboards.get_tips_categories_keyboard()
+            )
+            await callback.answer()
+            return
+
+        # Обрабатываем выбор конкретного совета
+        tip_id = int(callback.data.split('_')[1])  # Извлекаем ID из callback_data (tip_<id>)
         user_data = await state.get_data()
         category = user_data.get('category')
         with db.get_db() as db_session:
@@ -619,9 +629,20 @@ async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
                 reply_markup=keyboards.get_tip_content_keyboard(category)
             )
         await callback.answer()
+    except ValueError as e:
+        logger.error(f"Invalid callback data in cq_tip_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Неверный выбор. Попробуйте снова.",
+            reply_markup=keyboards.get_tips_categories_keyboard()
+        )
+        await callback.answer()
     except Exception as e:
-        logger.error(f"Error in tip_chosen for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+        logger.error(f"Error in cq_tip_chosen for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "menu_mark_done")
 async def cq_mark_done_menu(callback: CallbackQuery):
