@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError, IntegrityError
 import random
+from typing import List, Dict  # Добавляем импорт List и Dict
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -523,8 +524,6 @@ def save_productivity_answer(user_id: int, question: str, answer: str):
             db.commit()
             logger.info(f"Saved productivity answer for user {user_id}")
     except Exception as e:
-        logger.error(f" jude, :answer)")
-    except Exception as e:
         logger.error(f"Error saving productivity answer for user {user_id}: {e}")
         raise
 
@@ -615,4 +614,40 @@ def check_and_award_achievements(user_id: int):
             db.commit()
     except Exception as e:
         logger.error(f"Error checking achievements for user {user_id}: {e}")
+        raise
+
+def get_tips_by_category(category: str) -> List[Dict[str, str]]:
+    try:
+        with get_db() as db:
+            stmt = text("SELECT id, tip AS title FROM tips WHERE category = :category")
+            tips = db.execute(stmt, {'category': category}).fetchall()
+            return [{'id': tip.id, 'title': tip.title} for tip in tips]
+    except Exception as e:
+        logger.error(f"Error fetching tips for category {category}: {e}")
+        raise
+
+def get_habits_with_progress(user_id: int) -> List[Dict[str, any]]:
+    try:
+        with get_db() as db:
+            stmt = text("""
+                SELECT h.id, h.habit_name AS name, 
+                       COUNT(hc.completed) FILTER (WHERE hc.completed = true) AS completed_count,
+                       COUNT(hc.completed) AS total_count
+                FROM habits h
+                LEFT JOIN habit_completions hc ON h.id = hc.habit_id AND h.user_id = hc.user_id
+                WHERE h.user_id = :user_id
+                GROUP BY h.id, h.habit_name
+            """)
+            habits = db.execute(stmt, {'user_id': user_id}).fetchall()
+            result = []
+            for habit in habits:
+                progress = (habit.completed_count / habit.total_count * 100) if habit.total_count > 0 else 0
+                result.append({
+                    'id': habit.id,
+                    'name': habit.name,
+                    'progress': progress
+                })
+            return result
+    except Exception as e:
+        logger.error(f"Error fetching habits with progress for user_id {user_id}: {e}")
         raise

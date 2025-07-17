@@ -20,6 +20,7 @@ def get_main_menu_keyboard(include_settings: bool = False) -> InlineKeyboardMark
     builder.button(text="📊 Статистика", callback_data="menu_stats")
     builder.button(text="🏆 Достижения", callback_data="menu_achievements")
     builder.button(text="📋 Привычки", callback_data="menu_habits")
+    builder.button(text="🎯 Цели", callback_data="menu_goals")
     builder.button(text="💡 Советы", callback_data="menu_tips")
     builder.button(text="🗑️ Очистить данные", callback_data="menu_clear_stats")
     if include_settings:
