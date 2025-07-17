@@ -597,16 +597,41 @@ async def cq_tip_category_chosen(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in tip_category_chosen for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
 
-@dp.callback_query(lambda c: c.data.startswith("tip_") or c.data == "category", StateFilter(TipsSelection.choosing_tip))
+@dp.callback_query(lambda c: c.data.startswith("tip_") or c.data == "category" or c.data.startswith("tip_category_"), StateFilter(TipsSelection.choosing_tip))
 async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Tip chosen by user_id: {callback.from_user.id}: {callback.data}")
     try:
         if callback.data == 'category':
             # Возвращаем пользователя к списку категорий
+            logger.debug(f"User {callback.from_user.id} requested to return to categories")
             await callback.message.edit_text(
                 "Выберите категорию совета:",
                 reply_markup=keyboards.get_tips_categories_keyboard()
             )
+            await state.set_state(TipsSelection.choosing_category)
+            await callback.answer()
+            return
+
+        if callback.data.startswith('tip_category_'):
+            # Возвращаем пользователя к списку советов в категории
+            category = callback.data.replace("tip_category_", "")
+            logger.debug(f"User {callback.from_user.id} requested tips for category: {category}")
+            await state.update_data(category=category)
+            tips = db.get_tips_by_category(category)
+            if not tips:
+                logger.warning(f"No tips found for category {category} for user_id {callback.from_user.id}")
+                await callback.message.edit_text(
+                    f"Советов в категории '{category}' пока нет.",
+                    reply_markup=keyboards.get_tips_categories_keyboard()
+                )
+                await state.set_state(TipsSelection.choosing_category)
+                await callback.answer()
+                return
+            await callback.message.edit_text(
+                f"Советы в категории '{category}':",
+                reply_markup=keyboards.get_tips_by_category_keyboard(tips)
+            )
+            await state.set_state(TipsSelection.choosing_tip)
             await callback.answer()
             return
 
@@ -614,20 +639,32 @@ async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
         tip_id = int(callback.data.split('_')[1])  # Извлекаем ID из callback_data (tip_<id>)
         user_data = await state.get_data()
         category = user_data.get('category')
+        if not category:
+            logger.error(f"No category found in state for user_id {callback.from_user.id}")
+            await callback.message.edit_text(
+                "⚠️ Ошибка: категория не выбрана. Попробуйте снова.",
+                reply_markup=keyboards.get_tips_categories_keyboard()
+            )
+            await state.set_state(TipsSelection.choosing_category)
+            await callback.answer()
+            return
         with db.get_db() as db_session:
             stmt = text("SELECT tip FROM tips WHERE id = :tip_id")
             tip = db_session.execute(stmt, {'tip_id': tip_id}).first()
             if not tip:
+                logger.warning(f"Tip with id {tip_id} not found for user_id {callback.from_user.id}")
                 await callback.message.edit_text(
                     "Совет не найден.",
                     reply_markup=keyboards.get_tips_categories_keyboard()
                 )
+                await state.set_state(TipsSelection.choosing_category)
                 await callback.answer()
                 return
             await callback.message.edit_text(
                 f"💡 {category}: {tip.tip}",
                 reply_markup=keyboards.get_tip_content_keyboard(category)
             )
+        await state.set_state(TipsSelection.choosing_tip)
         await callback.answer()
     except ValueError as e:
         logger.error(f"Invalid callback data in cq_tip_chosen for user_id {callback.from_user.id}: {e}")
@@ -635,6 +672,7 @@ async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
             "⚠️ Неверный выбор. Попробуйте снова.",
             reply_markup=keyboards.get_tips_categories_keyboard()
         )
+        await state.set_state(TipsSelection.choosing_category)
         await callback.answer()
     except Exception as e:
         logger.error(f"Error in cq_tip_chosen for user_id {callback.from_user.id}: {e}")
@@ -642,6 +680,7 @@ async def cq_tip_chosen(callback: CallbackQuery, state: FSMContext):
             "⚠️ Ошибка. Попробуйте позже.",
             reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
         )
+        await state.set_state(TipsSelection.choosing_category)
         await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "menu_mark_done")
