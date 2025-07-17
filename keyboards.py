@@ -81,7 +81,7 @@ def get_tips_by_category_keyboard(tips: List[Dict[str, str]]) -> InlineKeyboardM
     """
     logger.debug("Creating tips by category keyboard")
     buttons = [[InlineKeyboardButton(text=tip['title'], callback_data=f"tip_{tip['id']}")] for tip in tips]
-    buttons.append([InlineKeyboardButton(text="« Назад к категориям", callback_data="menu_tips")])
+    buttons.append([InlineKeyboardButton(text="« Назад к категориям", callback_data="category")])  # Исправлено
     buttons.append([InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
