@@ -1234,6 +1234,221 @@ async def handle_productivity_answer(message: Message, state: FSMContext):
         logger.error(f"Error in handle_productivity_answer for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
+# FSM состояние для справки
+class HelpSection(StatesGroup):
+    choosing_section = State()
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message, state: FSMContext):
+    logger.info(f"Received /help from user_id: {message.from_user.id}")
+    try:
+        await state.clear()
+        await message.answer(
+            "Выберите раздел справки:",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await state.set_state(HelpSection.choosing_section)
+    except Exception as e:
+        logger.error(f"Error in /help for user_id {message.from_user.id}: {e}")
+        await message.answer(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+
+@dp.callback_query(lambda c: c.data == "menu_help", StateFilter("*"))
+async def cq_help_menu(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback menu_help from user_id: {callback.from_user.id}")
+    try:
+        await state.clear()
+        await callback.message.edit_text(
+            "Выберите раздел справки:",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await state.set_state(HelpSection.choosing_section)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in menu_help for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_general", StateFilter(HelpSection.choosing_section))
+async def cq_help_general(callback: CallbackQuery):
+    logger.info(f"Received callback help_general from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "📖 <b>Общее</b>\n\n"
+            "Этот бот помогает отслеживать продуктивность, привычки, цели и достижения. "
+            "Используйте /menu для доступа к функциям. "
+            "Планируйте день с /morning, отмечайте задачи, смотрите статистику с /stats."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_general for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_activities", StateFilter(HelpSection.choosing_section))
+async def cq_help_activities(callback: CallbackQuery):
+    logger.info(f"Received callback help_activities from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "🏃 <b>Активности</b>\n\n"
+            "Отмечайте задачи (тренировка, язык и т.д.) через 'Отметить выполнение'. "
+            "Записывайте активности с /log (например, 'Чтение' или 'YouTube', указав минуты). "
+            "Планируйте с /morning."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_activities for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_goals", StateFilter(HelpSection.choosing_section))
+async def cq_help_goals(callback: CallbackQuery):
+    logger.info(f"Received callback help_goals from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "🎯 <b>Цели</b>\n\n"
+            "Добавляйте цели через /goals. Выбирайте тип: ежедневная или еженедельная (укажите дни). "
+            "Отмечайте прогресс вечером или вручную. "
+            "Пример: 'Тренироваться 5 дней в неделю'."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_goals for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_tips", StateFilter(HelpSection.choosing_section))
+async def cq_help_tips(callback: CallbackQuery):
+    logger.info(f"Received callback help_tips from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "💡 <b>Советы</b>\n\n"
+            "Выбирайте категорию (Мотивация, Спорт и т.д.) через /tips. "
+            "Просматривайте советы и возвращайтесь к категориям для новой темы."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_tips for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_achievements", StateFilter(HelpSection.choosing_section))
+async def cq_help_achievements(callback: CallbackQuery):
+    logger.info(f"Received callback help_achievements from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "🏆 <b>Достижения</b>\n\n"
+            "Добавляйте достижения через /achievements (например, '25 подтягиваний', указав дату ДД.ММ). "
+            "Просматривайте свои успехи для мотивации!"
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_achievements for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_habits", StateFilter(HelpSection.choosing_section))
+async def cq_help_habits(callback: CallbackQuery):
+    logger.info(f"Received callback help_habits from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "📋 <b>Привычки</b>\n\n"
+            "Добавляйте привычки через /habits (например, 'Читать 30 минут'). "
+            "Отмечайте выполнение вечером и следите за стриками."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_habits for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "help_stats", StateFilter(HelpSection.choosing_section))
+async def cq_help_stats(callback: CallbackQuery):
+    logger.info(f"Received callback help_stats from user_id: {callback.from_user.id}")
+    try:
+        help_text = (
+            "📊 <b>Статистика</b>\n\n"
+            "Просматривайте прогресс с /stats. "
+            "Анализируйте время экрана, продуктивность, цели и привычки в веб-приложении."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_stats for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "menu_back", StateFilter(HelpSection.choosing_section))
+async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"Received callback menu_back from help for user_id: {callback.from_user.id}")
+    try:
+        await state.clear()
+        await callback.message.edit_text(
+            "Выберите действие:",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in back_from_help for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer()
+
 # API endpoints
 @fastapi_app.get("/api/stats/{user_id}", response_model=UserStatsResponse)
 async def read_user_stats(user_id: int):

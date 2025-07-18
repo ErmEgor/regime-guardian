@@ -23,6 +23,7 @@ def get_main_menu_keyboard(include_settings: bool = False) -> InlineKeyboardMark
     builder.button(text="🎯 Цели", callback_data="menu_goals")
     builder.button(text="💡 Советы", callback_data="menu_tips")
     builder.button(text="🗑️ Очистить данные", callback_data="menu_clear_stats")
+    builder.button(text="❓ Помощь", callback_data="menu_help")  # Новая кнопка Помощь
     if include_settings:
         builder.button(text="⚙️ Настройки", callback_data="menu_settings")
     builder.adjust(1)
@@ -319,5 +320,22 @@ def get_goal_confirm_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="✅ Подтвердить", callback_data="goal_confirm")],
         [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_help_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает подменю для раздела помощи с категориями.
+    """
+    logger.debug("Creating help menu keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="📖 Общее", callback_data="help_general")],
+        [InlineKeyboardButton(text="🏃 Активности", callback_data="help_activities")],
+        [InlineKeyboardButton(text="🎯 Цели", callback_data="help_goals")],
+        [InlineKeyboardButton(text="💡 Советы", callback_data="help_tips")],
+        [InlineKeyboardButton(text="🏆 Достижения", callback_data="help_achievements")],
+        [InlineKeyboardButton(text="📋 Привычки", callback_data="help_habits")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="help_stats")],
+        [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
