@@ -908,3 +908,48 @@ def get_sport_achievements(user_id: int) -> List[Dict[str, any]]:
     except Exception as e:
         logger.error(f"Error fetching sport achievements for user_id {user_id}: {e}")
         raise
+
+def get_habits(user_id: int) -> List[Dict[str, any]]:
+    """
+    Получает список привычек пользователя.
+    """
+    try:
+        with get_db() as db:
+            stmt = text("""
+                SELECT id, habit_name AS name
+                FROM habits
+                WHERE user_id = :user_id
+                ORDER BY id
+            """)
+            habits = db.execute(stmt, {'user_id': user_id}).fetchall()
+            return [{'id': habit.id, 'name': habit.name} for habit in habits]
+    except Exception as e:
+        logger.error(f"Error fetching habits for user_id {user_id}: {e}")
+        raise
+
+def get_goals(user_id: int) -> List[Dict[str, any]]:
+    """
+    Получает список активных целей пользователя.
+    """
+    try:
+        with get_db() as db:
+            stmt = text("""
+                SELECT id, goal_name AS name, goal_type, target_value, current_value, start_date, end_date, streak
+                FROM goals
+                WHERE user_id = :user_id AND is_completed = false
+                ORDER BY start_date
+            """)
+            goals = db.execute(stmt, {'user_id': user_id}).fetchall()
+            return [{
+                'id': goal.id,
+                'name': goal.name,
+                'goal_type': goal.goal_type,
+                'target_value': goal.target_value,
+                'current_value': goal.current_value,
+                'start_date': goal.start_date,
+                'end_date': goal.end_date,
+                'streak': goal.streak
+            } for goal in goals]
+    except Exception as e:
+        logger.error(f"Error fetching goals for user_id {user_id}: {e}")
+        raise
