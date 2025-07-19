@@ -890,3 +890,21 @@ def delete_goal(user_id: int, goal_id: int):
     except Exception as e:
         logger.error(f"Error deleting goal {goal_id} for user {user_id}: {e}")
         raise
+
+def get_sport_achievements(user_id: int) -> List[Dict[str, any]]:
+    """
+    Получает список спортивных достижений пользователя.
+    """
+    try:
+        with get_db() as db:
+            stmt = text("""
+                SELECT id, achievement_name AS name, date_earned
+                FROM sport_achievements
+                WHERE user_id = :user_id
+                ORDER BY date_earned DESC
+            """)
+            achievements = db.execute(stmt, {'user_id': user_id}).fetchall()
+            return [{'id': ach.id, 'name': ach.name, 'date_earned': ach.date_earned} for ach in achievements]
+    except Exception as e:
+        logger.error(f"Error fetching sport achievements for user_id {user_id}: {e}")
+        raise
