@@ -1928,6 +1928,92 @@ async def evening_summary_cron():
         logger.error(f"Error in evening summary CRON: {e}")
         db_session.rollback()
         return {"status": "error", "message": str(e)}
+    
+@fastapi_app.get("/api/afternoon/cron")
+async def afternoon_reminder_cron():
+    logger.info("Running afternoon reminder CRON via GET")
+    now = pendulum.now(TIMEZONE)
+    if not (15 <= now.hour <= 17):
+        logger.info(f"Skipping afternoon reminder CRON: current time {now} is outside 15:00-17:00 Asia/Almaty")
+        return {"status": "skipped", "message": "Outside afternoon reminder window"}
+
+    try:
+        with db.get_db() as db_session:
+            # Получаем пользователей, у которых есть статистика за сегодня
+            stmt = text("SELECT user_id, is_rest_day, morning_poll_completed FROM daily_stats WHERE stat_date = :today")
+            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
+            if not users:
+                logger.warning("No users with stats for today found")
+                return {"status": "skipped", "message": "No users with stats for today"}
+
+            for user in users:
+                user_id = user._asdict()['user_id']
+                is_rest_day = user._asdict()['is_rest_day']
+                morning_poll_completed = user._asdict()['morning_poll_completed']
+                try:
+                    if is_rest_day:
+                        logger.info(f"Skipping afternoon reminder for user_id: {user_id}, rest day")
+                        continue
+                    if not morning_poll_completed:
+                        logger.info(f"Skipping afternoon reminder for user_id: {user_id}, morning poll not completed")
+                        continue
+
+                    # Проверяем наличие активностей, привычек и целей
+                    activities_planned = False
+                    habits_exist = False
+                    goals_exist = False
+
+                    # Проверка запланированных активностей
+                    stats = db.get_today_stats_for_user(user_id)
+                    if stats and any([
+                        stats['workout_planned'], stats['english_planned'], stats['coding_planned'],
+                        stats['planning_planned'], stats['stretching_planned'], stats['reflection_planned'],
+                        stats['walk_planned']
+                    ]):
+                        activities_planned = True
+
+                    # Проверка наличия привычек
+                    habit_stmt = text("SELECT id FROM habits WHERE user_id = :uid LIMIT 1")
+                    if db_session.execute(habit_stmt, {'uid': user_id}).first():
+                        habits_exist = True
+
+                    # Проверка наличия активных целей
+                    goal_stmt = text("SELECT id FROM goals WHERE user_id = :uid AND is_completed = false LIMIT 1")
+                    if db_session.execute(goal_stmt, {'uid': user_id}).first():
+                        goals_exist = True
+
+                    if not (activities_planned or habits_exist or goals_exist):
+                        logger.info(f"Skipping afternoon reminder for user_id: {user_id}, no activities, habits, or goals")
+                        continue
+
+                    # Формируем текст напоминания
+                    reminder_lines = [
+                        "🔔 Напоминание, командир!",
+                        "Не забудьте отметить выполнение ваших задач за сегодня:"
+                    ]
+                    if activities_planned:
+                        reminder_lines.append("• Активности (тренировка, язык, программирование и др.)")
+                    if habits_exist:
+                        reminder_lines.append("• Привычки")
+                    if goals_exist:
+                        reminder_lines.append("• Цели")
+                    reminder_lines.append("\nИспользуйте /menu или /mark_done, чтобы отметить выполнение!")
+
+                    await bot.send_message(
+                        user_id,
+                        "\n".join(reminder_lines),
+                        reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+                    )
+                    logger.info(f"Sent afternoon reminder to user_id: {user_id}")
+
+                except TelegramAPIError as e:
+                    logger.error(f"Failed to send afternoon reminder to user_id {user_id}: {e}")
+            db_session.commit()
+        return {"status": "sent"}
+    except Exception as e:
+        logger.error(f"Error in afternoon reminder CRON: {e}")
+        db_session.rollback()
+        return {"status": "error", "message": str(e)}
 
 # Webhook setup
 async def on_startup():
