@@ -121,6 +121,7 @@ def init_db():
             """))
             
             # Создание таблицы goal_completions
+            print("Инициализация таблицы goal_completions...")
             db.execute(text("""
                 CREATE TABLE IF NOT EXISTS goal_completions (
                     id SERIAL PRIMARY KEY,
@@ -131,6 +132,7 @@ def init_db():
                     UNIQUE(user_id, goal_id, completion_date)
                 )
             """))
+            print("Таблица goal_completions создана или уже существует")
             
             # Создание таблицы habits
             db.execute(text("""
