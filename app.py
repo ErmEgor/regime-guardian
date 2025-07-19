@@ -562,6 +562,166 @@ async def cq_view_habits(callback: CallbackQuery):
         )
         await callback.answer()
 
+@dp.callback_query(lambda c: c.data == "achievements_delete")
+async def cq_delete_achievements_menu(callback: CallbackQuery):
+    """
+    Показывает список достижений для выбора удаления.
+    """
+    logger.info(f"Received callback achievements_delete from user_id: {callback.from_user.id}")
+    try:
+        with db.get_db() as db_session:
+            stmt = text("SELECT id, achievement_name, date_earned FROM sport_achievements WHERE user_id = :uid ORDER BY date_earned DESC")
+            achievements = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            if not achievements:
+                await callback.message.edit_text(
+                    "🏆 У вас пока нет достижений для удаления.",
+                    reply_markup=keyboards.get_achievements_menu_keyboard()
+                )
+                await callback.answer()
+                return
+            keyboard = keyboards.get_delete_achievements_keyboard(callback.from_user.id)
+            await callback.message.edit_text(
+                "Выберите достижение для удаления:",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in achievements_delete for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке достижений для удаления. Попробуйте позже.",
+            reply_markup=keyboards.get_achievements_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_achievement_"))
+async def cq_delete_achievement(callback: CallbackQuery):
+    """
+    Удаляет выбранное достижение.
+    """
+    logger.info(f"Received callback delete_achievement for user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        achievement_id = int(callback.data.split("_")[-1])
+        db.delete_sport_achievement(callback.from_user.id, achievement_id)
+        await callback.message.edit_text(
+            "🏆 Достижение успешно удалено!",
+            reply_markup=keyboards.get_achievements_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error deleting achievement for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при удалении достижения. Попробуйте позже.",
+            reply_markup=keyboards.get_achievements_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "habits_delete")
+async def cq_delete_habits_menu(callback: CallbackQuery):
+    """
+    Показывает список привычек для выбора удаления.
+    """
+    logger.info(f"Received callback habits_delete from user_id: {callback.from_user.id}")
+    try:
+        habits = db.get_habits(callback.from_user.id)
+        if not habits:
+            await callback.message.edit_text(
+                "📋 У вас пока нет привычек для удаления.",
+                reply_markup=keyboards.get_habits_menu_keyboard()
+            )
+            await callback.answer()
+            return
+        keyboard = keyboards.get_delete_habits_keyboard(callback.from_user.id)
+        await callback.message.edit_text(
+            "Выберите привычку для удаления:",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in habits_delete for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке привычек для удаления. Попробуйте позже.",
+            reply_markup=keyboards.get_habits_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_habit_"))
+async def cq_delete_habit(callback: CallbackQuery):
+    """
+    Удаляет выбранную привычку.
+    """
+    logger.info(f"Received callback delete_habit for user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        habit_id = int(callback.data.split("_")[-1])
+        db.delete_habit(callback.from_user.id, habit_id)
+        await callback.message.edit_text(
+            "✅ Привычка успешно удалена!",
+            reply_markup=keyboards.get_habits_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error deleting habit for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при удалении привычки. Попробуйте позже.",
+            reply_markup=keyboards.get_habits_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "goals_delete")
+async def cq_delete_goals_menu(callback: CallbackQuery):
+    """
+    Показывает список целей для выбора удаления.
+    """
+    logger.info(f"Received callback goals_delete from user_id: {callback.from_user.id}")
+    try:
+        with db.get_db() as db_session:
+            stmt = text("""
+                SELECT id, goal_name, goal_type, target_value, current_value, start_date, end_date, is_completed, streak
+                FROM goals WHERE user_id = :uid ORDER BY start_date
+            """)
+            goals = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
+            if not goals:
+                await callback.message.edit_text(
+                    "🎯 У вас пока нет целей для удаления.",
+                    reply_markup=keyboards.get_goals_menu_keyboard()
+                )
+                await callback.answer()
+                return
+            keyboard = keyboards.get_delete_goals_keyboard(callback.from_user.id)
+            await callback.message.edit_text(
+                "Выберите цель для удаления:",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in goals_delete for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при загрузке целей для удаления. Попробуйте позже.",
+            reply_markup=keyboards.get_goals_menu_keyboard()
+        )
+        await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_goal_"))
+async def cq_delete_goal(callback: CallbackQuery):
+    """
+    Удаляет выбранную цель.
+    """
+    logger.info(f"Received callback delete_goal for user_id: {callback.from_user.id}: {callback.data}")
+    try:
+        goal_id = int(callback.data.split("_")[-1])
+        db.delete_goal(callback.from_user.id, goal_id)
+        await callback.message.edit_text(
+            "🎯 Цель успешно удалена!",
+            reply_markup=keyboards.get_goals_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error deleting goal for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка при удалении цели. Попробуйте позже.",
+            reply_markup=keyboards.get_goals_menu_keyboard()
+        )
+        await callback.answer()
+
 @dp.callback_query(lambda c: c.data == "menu_tips", StateFilter("*"))
 async def cq_tips_menu(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Received callback menu_tips from user_id: {callback.from_user.id}")

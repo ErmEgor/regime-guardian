@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import date
 from sqlalchemy import text
-from db import get_db
+from db import get_db, get_sport_achievements, get_habits, get_goals
 import logging
 from typing import Optional, List, Dict
 
@@ -38,6 +38,7 @@ def get_achievements_menu_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📜 Просмотреть достижения", callback_data="achievements_view")],
         [InlineKeyboardButton(text="✍️ Добавить достижение", callback_data="achievements_add")],
+        [InlineKeyboardButton(text="🗑️ Удалить достижение", callback_data="achievements_delete")],
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -50,6 +51,7 @@ def get_habits_menu_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📜 Просмотреть привычки", callback_data="habits_view")],
         [InlineKeyboardButton(text="✍️ Добавить привычку", callback_data="habits_add")],
+        [InlineKeyboardButton(text="🗑️ Удалить привычку", callback_data="habits_delete")],
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -62,8 +64,48 @@ def get_goals_menu_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📜 Просмотреть цели", callback_data="goals_view")],
         [InlineKeyboardButton(text="✍️ Добавить цель", callback_data="goals_add")],
+        [InlineKeyboardButton(text="🗑️ Удалить цель", callback_data="goals_delete")],
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_achievements_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру с достижениями пользователя для выбора удаления.
+    """
+    logger.debug(f"Creating delete achievements keyboard for user {user_id}")
+    achievements = get_sport_achievements(user_id)
+    buttons = [
+        [InlineKeyboardButton(text=f"{ach['description']}", callback_data=f"delete_achievement_{ach['id']}")]
+        for ach in achievements
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="achievements_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_habits_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру с привычками пользователя для выбора удаления.
+    """
+    logger.debug(f"Creating delete habits keyboard for user {user_id}")
+    habits = get_habits(user_id)
+    buttons = [
+        [InlineKeyboardButton(text=f"{habit['name']}", callback_data=f"delete_habit_{habit['id']}")]
+        for habit in habits
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="habits_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_goals_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру с целями пользователя для выбора удаления.
+    """
+    logger.debug(f"Creating delete goals keyboard for user {user_id}")
+    goals = get_goals(user_id)
+    buttons = [
+        [InlineKeyboardButton(text=f"{goal['name']}", callback_data=f"delete_goal_{goal['id']}")]
+        for goal in goals
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="goals_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_tips_categories_keyboard() -> InlineKeyboardMarkup:

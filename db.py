@@ -835,4 +835,58 @@ def get_habit_streak(user_id: int, habit_id: int) -> int:
     except Exception as e:
         logger.error(f"Error calculating habit streak for user {user_id}, habit {habit_id}: {e}")
         raise
+ 
+def delete_sport_achievement(user_id: int, achievement_id: int):
+    """
+    Удаляет конкретное спортивное достижение пользователя по его ID.
+    """
+    try:
+        with get_db() as db:
+            stmt = text("DELETE FROM sport_achievements WHERE user_id = :user_id AND id = :achievement_id")
+            result = db.execute(stmt, {'user_id': user_id, 'achievement_id': achievement_id})
+            db.commit()
+            if result.rowcount > 0:
+                logger.info(f"Deleted sport achievement {achievement_id} for user {user_id}")
+            else:
+                logger.warning(f"No sport achievement {achievement_id} found for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error deleting sport achievement {achievement_id} for user {user_id}: {e}")
+        raise
 
+def delete_habit(user_id: int, habit_id: int):
+    """
+    Удаляет конкретную привычку пользователя по её ID, включая связанные записи в habit_completions.
+    """
+    try:
+        with get_db() as db:
+            db.execute(text("DELETE FROM habit_completions WHERE user_id = :user_id AND habit_id = :habit_id"),
+                      {'user_id': user_id, 'habit_id': habit_id})
+            stmt = text("DELETE FROM habits WHERE user_id = :user_id AND id = :habit_id")
+            result = db.execute(stmt, {'user_id': user_id, 'habit_id': habit_id})
+            db.commit()
+            if result.rowcount > 0:
+                logger.info(f"Deleted habit {habit_id} for user {user_id}")
+            else:
+                logger.warning(f"No habit {habit_id} found for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error deleting habit {habit_id} for user {user_id}: {e}")
+        raise
+
+def delete_goal(user_id: int, goal_id: int):
+    """
+    Удаляет конкретную цель пользователя по её ID, включая связанные записи в goal_completions.
+    """
+    try:
+        with get_db() as db:
+            db.execute(text("DELETE FROM goal_completions WHERE user_id = :user_id AND goal_id = :goal_id"),
+                      {'user_id': user_id, 'goal_id': goal_id})
+            stmt = text("DELETE FROM goals WHERE user_id = :user_id AND id = :goal_id")
+            result = db.execute(stmt, {'user_id': user_id, 'goal_id': goal_id})
+            db.commit()
+            if result.rowcount > 0:
+                logger.info(f"Deleted goal {goal_id} for user {user_id}")
+            else:
+                logger.warning(f"No goal {goal_id} found for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error deleting goal {goal_id} for user {user_id}: {e}")
+        raise
