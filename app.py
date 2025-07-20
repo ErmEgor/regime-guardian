@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy.sql import text
 from sqlalchemy.exc import IntegrityError
 from aiogram.fsm.storage.redis import RedisStorage
-import redis
+from redis.asyncio.client import Redis
 
 import db
 import keyboards
@@ -59,7 +59,7 @@ REDIS_URL = os.getenv("REDIS_URL")
 if not REDIS_URL:
     raise ValueError("REDIS_URL не установлен в .env или переменных окружения")
 
-redis_client = redis.from_url(REDIS_URL)
+redis_client = Redis.from_url(REDIS_URL)
 storage = RedisStorage(redis=redis_client)
 dp = Dispatcher(storage=storage)
 fastapi_app = FastAPI()
