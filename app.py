@@ -70,12 +70,19 @@ class HistoryDayStats(BaseModel):
     screen_time_goal: int
     screen_time_actual: int
     productive_time_actual: int
+    workout_planned: int
     workout_done: int
+    english_planned: int
     english_done: int
+    coding_planned: int
     coding_done: int
+    planning_planned: int
     planning_done: int
+    stretching_planned: int
     stretching_done: int
+    reflection_planned: int
     reflection_done: int
+    walk_planned: int
     walk_done: int
     is_rest_day: bool
 
@@ -1723,12 +1730,19 @@ async def read_user_stats(user_id: int):
                     screen_time_goal=day_stats._asdict()['screen_time_goal'],
                     screen_time_actual=screen_time_map.get(day_stats._asdict()['stat_date'], 0),
                     productive_time_actual=productive_time_map.get(day_stats._asdict()['stat_date'], 0),
+                    workout_planned=day_stats._asdict()['workout_planned'],
                     workout_done=day_stats._asdict()['workout_done'],
+                    english_planned=day_stats._asdict()['english_planned'],
                     english_done=day_stats._asdict()['english_done'],
+                    coding_planned=day_stats._asdict()['coding_planned'],
                     coding_done=day_stats._asdict()['coding_done'],
+                    planning_planned=day_stats._asdict()['planning_planned'],
                     planning_done=day_stats._asdict()['planning_done'],
+                    stretching_planned=day_stats._asdict()['stretching_planned'],
                     stretching_done=day_stats._asdict()['stretching_done'],
+                    reflection_planned=day_stats._asdict()['reflection_planned'],
                     reflection_done=day_stats._asdict()['reflection_done'],
+                    walk_planned=day_stats._asdict()['walk_planned'],
                     walk_done=day_stats._asdict()['walk_done'],
                     is_rest_day=day_stats._asdict()['is_rest_day']
                 )
