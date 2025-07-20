@@ -64,6 +64,10 @@ storage = RedisStorage(redis=redis_client)
 dp = Dispatcher(storage=storage)
 fastapi_app = FastAPI()
 
+logger.info("Initializing database...")
+db.init_db()
+logger.info("Database initialization complete.")
+
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
