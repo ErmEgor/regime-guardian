@@ -22,13 +22,17 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramAPIError
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.sql import text
 from sqlalchemy.exc import IntegrityError
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio.client import Redis
+import hmac
+import hashlib
+import json
+from urllib.parse import parse_qsl
 
 import db
 import keyboards
@@ -75,6 +79,40 @@ fastapi_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- НОВАЯ ФУНКЦИЯ ВАЛИДАЦИИ INITDATA ---
+def validate_init_data(init_data: str, bot_token: str) -> Optional[Dict]:
+    """
+    Валидирует initData, полученную от Telegram Web App.
+    """
+    try:
+        parsed_data = dict(parse_qsl(init_data))
+        received_hash = parsed_data.pop('hash', None)
+        if not received_hash:
+            return None
+
+        data_check_string = "\n".join(
+            f"{k}={v}" for k, v in sorted(parsed_data.items())
+        )
+
+        secret_key = hmac.new(
+            "WebAppData".encode(), bot_token.encode(), hashlib.sha256
+        ).digest()
+        
+        calculated_hash = hmac.new(
+            secret_key, data_check_string.encode(), hashlib.sha256
+        ).hexdigest()
+
+        if calculated_hash == received_hash:
+            user_data = json.loads(parsed_data.get('user', '{}'))
+            if 'id' not in user_data:
+                return None
+            return user_data
+        
+        return None
+    except Exception as e:
+        logger.error(f"Could not validate initData: {e}")
+        return None
 
 # Модели Pydantic для API
 class HistoryDayStats(BaseModel):
@@ -1486,9 +1524,21 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
 # API endpoints
-@fastapi_app.get("/api/stats/{user_id}", response_model=UserStatsResponse)
-async def read_user_stats(user_id: int):
+@fastapi_app.post("/api/stats", response_model=UserStatsResponse)
+async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data")):
+    # 1. Валидируем initData
+    user_data_from_telegram = validate_init_data(x_telegram_init_data, BOT_TOKEN)
+    
+    if user_data_from_telegram is None:
+        logger.warning("Failed validation of initData.")
+        raise HTTPException(status_code=401, detail="Not authorized: Invalid InitData")
+
+    # 2. Безопасно получаем user_id
+    user_id = user_data_from_telegram['id']
+    logger.info(f"Validated stats request for user_id: {user_id}")
+    
     try:
+        # 3. Получаем статистику, как и раньше
         stats = db.get_full_user_stats(user_id)
         if not stats or not stats.get('today_main_stats'):
             raise HTTPException(status_code=404, detail="План на сегодня не найден. Заполните утренний опрос /morning.")
@@ -1549,40 +1599,40 @@ async def handle_ping(request: Request):
     logger.info(f"Received {request.method} /ping request from {request.client.host}")
     return {"status": "ok"}
 
-@fastapi_app.get("/api/morning/cron")
-async def morning_poll_cron():
-    logger.info("Running morning poll CRON via GET")
-    try:
-        with db.get_db() as db_session:
-            stmt = text("SELECT user_id, timezone FROM users")
-            users = db_session.execute(stmt).fetchall()
-            if not users:
-                return {"status": "skipped", "message": "No users"}
-            
-            for user in users:
-                user_id, user_timezone = user.user_id, user.timezone or 'Asia/Almaty'
-                now = pendulum.now(user_timezone)
-
-                if not (7 <= now.hour <= 9):
-                    continue
-
-                try:
-                    stmt_check = text("SELECT morning_poll_completed, is_rest_day FROM daily_stats WHERE user_id = :uid AND stat_date = :today")
-                    result = db_session.execute(stmt_check, {'uid': user_id, 'today': date.today()}).first()
-                    if result and (result.morning_poll_completed or result.is_rest_day):
-                        continue
-                    
-                    state = FSMContext(storage=dp.storage, key=types.StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
-                    await state.set_state(MorningPoll.choosing_day_type)
-                    await bot.send_message(user_id, "☀️ Доброе утро, командир! Какой у вас сегодня день?", reply_markup=keyboards.get_morning_day_type_keyboard())
-                    logger.info(f"Sent morning poll to user_id: {user_id}")
-                except TelegramAPIError as e:
-                    logger.error(f"Failed to send morning poll to user_id {user_id}: {e}")
-            
-        return {"status": "sent"}
-    except Exception as e:
-        logger.error(f"Error in morning poll CRON: {e}")
-        return {"status": "error", "message": str(e)}
+#@fastapi_app.get("/api/morning/cron")
+#async def morning_poll_cron():
+#    logger.info("Running morning poll CRON via GET")
+#    try:
+#        with db.get_db() as db_session:
+#            stmt = text("SELECT user_id, timezone FROM users")
+#            users = db_session.execute(stmt).fetchall()
+#            if not users:
+#                return {"status": "skipped", "message": "No users"}
+#            
+#            for user in users:
+#                user_id, user_timezone = user.user_id, user.timezone or 'Asia/Almaty'
+#                now = pendulum.now(user_timezone)
+#
+#                if not (7 <= now.hour <= 9):
+#                    continue
+#
+#                try:
+#                    stmt_check = text("SELECT morning_poll_completed, is_rest_day FROM daily_stats WHERE user_id = :uid AND stat_date = :today")
+#                    result = db_session.execute(stmt_check, {'uid': user_id, 'today': date.today()}).first()
+#                    if result and (result.morning_poll_completed or result.is_rest_day):
+#                        continue
+#                    
+#                    state = FSMContext(storage=dp.storage, key=types.StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+#                    await state.set_state(MorningPoll.choosing_day_type)
+#                    await bot.send_message(user_id, "☀️ Доброе утро, командир! Какой у вас сегодня день?", reply_markup=keyboards.get_morning_day_type_keyboard())
+#                    logger.info(f"Sent morning poll to user_id: {user_id}")
+#                except TelegramAPIError as e:
+#                    logger.error(f"Failed to send morning poll to user_id {user_id}: {e}")
+#            
+#        return {"status": "sent"}
+#    except Exception as e:
+#        logger.error(f"Error in morning poll CRON: {e}")
+#        return {"status": "error", "message": str(e)}
 
 @fastapi_app.get("/api/evening/cron")
 async def evening_summary_cron():
