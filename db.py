@@ -953,3 +953,56 @@ def get_goals(user_id: int) -> List[Dict[str, any]]:
     except Exception as e:
         logger.error(f"Error fetching goals for user_id {user_id}: {e}")
         raise
+
+def reset_goals():
+    """
+    Сбрасывает прогресс для ежедневных и еженедельных целей.
+    Ежедневные сбрасываются каждый день.
+    Еженедельные сбрасываются в понедельник.
+    """
+    try:
+        with get_db() as db:
+            today = date.today()
+            
+            # Сброс всех ежедневных целей
+            db.execute(text("""
+                UPDATE goals SET current_value = 0, is_completed = false 
+                WHERE goal_type = 'daily' AND is_completed = true
+            """))
+            logger.info("Reset progress for daily goals.")
+
+            # Если сегодня понедельник (weekday() == 0), сбрасываем еженедельные цели
+            if today.weekday() == 0:
+                db.execute(text("""
+                    UPDATE goals SET current_value = 0, is_completed = false 
+                    WHERE goal_type = 'weekly'
+                """))
+                logger.info("Reset progress for weekly goals because it's Monday.")
+            
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error resetting goals: {e}")
+        raise
+
+def set_user_timezone(user_id: int, timezone: str):
+    """Устанавливает часовой пояс для пользователя."""
+    try:
+        with get_db() as db:
+            stmt = text("UPDATE users SET timezone = :timezone WHERE user_id = :user_id")
+            db.execute(stmt, {'timezone': timezone, 'user_id': user_id})
+            db.commit()
+            logger.info(f"Set timezone for user {user_id} to {timezone}")
+    except Exception as e:
+        logger.error(f"Error setting timezone for user {user_id}: {e}")
+        raise
+
+def get_user_timezone(user_id: int) -> str:
+    """Получает часовой пояс пользователя из базы данных."""
+    try:
+        with get_db() as db:
+            stmt = text("SELECT timezone FROM users WHERE user_id = :user_id")
+            result = db.execute(stmt, {'user_id': user_id}).scalar_one_or_none()
+            return result or 'Asia/Almaty'
+    except Exception as e:
+        logger.error(f"Error getting timezone for user {user_id}: {e}")
+        return 'Asia/Almaty'

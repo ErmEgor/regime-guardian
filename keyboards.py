@@ -76,7 +76,7 @@ def get_delete_achievements_keyboard(user_id: int) -> InlineKeyboardMarkup:
     logger.debug(f"Creating delete achievements keyboard for user {user_id}")
     achievements = get_sport_achievements(user_id)
     buttons = [
-        [InlineKeyboardButton(text=f"{ach['description']}", callback_data=f"delete_achievement_{ach['id']}")]
+        [InlineKeyboardButton(text=f"{ach['name']}", callback_data=f"delete_achievement_{ach['id']}")]
         for ach in achievements
     ]
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="achievements_menu")])
@@ -307,16 +307,18 @@ def get_timezone_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder # Убедитесь, что этот импорт есть в начале файла
+
 def get_settings_keyboard(current_tz: str) -> InlineKeyboardMarkup:
-    """
-    Создает меню настроек с текущей временной зоной.
-    """
+    """Создает меню настроек со сменой часового пояса."""
     logger.debug(f"Creating settings keyboard with timezone: {current_tz}")
-    buttons = [
-        [InlineKeyboardButton(text=f"Текущий пояс: {current_tz or 'Не установлен'}", callback_data="inactive")],
-        [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"Текущий пояс: {current_tz}", callback_data="dummy_tz")
+    builder.button(text="Europe/Moscow (UTC+3)", callback_data="tz_set_Europe/Moscow")
+    builder.button(text="Asia/Almaty (UTC+5)", callback_data="tz_set_Asia/Almaty")
+    builder.button(text="« Назад в меню", callback_data="menu_back")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """
