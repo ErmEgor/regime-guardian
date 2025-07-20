@@ -2,9 +2,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import date
 from sqlalchemy import text
-from db import get_db, get_sport_achievements, get_habits, get_goals
+from db import get_db, get_paginated_achievements, get_paginated_habits, get_paginated_goals
 import logging
-from typing import Optional, List, Dict
+import math
+from typing import Optional, List, Dict, Tuple
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -69,44 +70,83 @@ def get_goals_menu_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_delete_achievements_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """
-    Создает клавиатуру с достижениями пользователя для выбора удаления.
-    """
-    logger.debug(f"Creating delete achievements keyboard for user {user_id}")
-    achievements = get_sport_achievements(user_id)
-    buttons = [
-        [InlineKeyboardButton(text=f"{ach['name']}", callback_data=f"delete_achievement_{ach['id']}")]
-        for ach in achievements
-    ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="achievements_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+# ЗАМЕНИТЬ НА ЭТОТ БЛОК
 
-def get_delete_habits_keyboard(user_id: int) -> InlineKeyboardMarkup:
+def get_delete_achievements_keyboard(user_id: int, page: int = 1) -> InlineKeyboardMarkup:
     """
-    Создает клавиатуру с привычками пользователя для выбора удаления.
+    Создает пагинированную клавиатуру с достижениями для удаления.
     """
-    logger.debug(f"Creating delete habits keyboard for user {user_id}")
-    habits = get_habits(user_id)
-    buttons = [
-        [InlineKeyboardButton(text=f"{habit['name']}", callback_data=f"delete_habit_{habit['id']}")]
-        for habit in habits
-    ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="habits_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    logger.debug(f"Creating delete achievements keyboard for user {user_id}, page {page}")
+    achievements, total_items = get_paginated_achievements(user_id, page=page, per_page=5)
+    builder = InlineKeyboardBuilder()
 
-def get_delete_goals_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    for ach in achievements:
+        builder.button(text=f"❌ {ach['name']}", callback_data=f"delete_achievement_{ach['id']}")
+
+    total_pages = math.ceil(total_items / 5)
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delete_achievement_page:{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"delete_achievement_page:{page+1}"))
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+
+    builder.row(InlineKeyboardButton(text="« В меню достижений", callback_data="menu_achievements"))
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_delete_habits_keyboard(user_id: int, page: int = 1) -> InlineKeyboardMarkup:
     """
-    Создает клавиатуру с целями пользователя для выбора удаления.
+    Создает пагинированную клавиатуру с привычками для удаления.
     """
-    logger.debug(f"Creating delete goals keyboard for user {user_id}")
-    goals = get_goals(user_id)
-    buttons = [
-        [InlineKeyboardButton(text=f"{goal['name']}", callback_data=f"delete_goal_{goal['id']}")]
-        for goal in goals
-    ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="goals_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    logger.debug(f"Creating delete habits keyboard for user {user_id}, page {page}")
+    habits, total_items = get_paginated_habits(user_id, page=page, per_page=5)
+    builder = InlineKeyboardBuilder()
+
+    for habit in habits:
+        builder.button(text=f"❌ {habit['name']}", callback_data=f"delete_habit_{habit['id']}")
+
+    total_pages = math.ceil(total_items / 5)
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delete_habit_page:{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"delete_habit_page:{page+1}"))
+
+    if nav_buttons:
+        builder.row(*nav_buttons)
+
+    builder.row(InlineKeyboardButton(text="« В меню привычек", callback_data="menu_habits"))
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_delete_goals_keyboard(user_id: int, page: int = 1) -> InlineKeyboardMarkup:
+    """
+    Создает пагинированную клавиатуру с целями для удаления.
+    """
+    logger.debug(f"Creating delete goals keyboard for user {user_id}, page {page}")
+    goals, total_items = get_paginated_goals(user_id, page=page, per_page=5)
+    builder = InlineKeyboardBuilder()
+
+    for goal in goals:
+        builder.button(text=f"❌ {goal['name']}", callback_data=f"delete_goal_{goal['id']}")
+
+    total_pages = math.ceil(total_items / 5)
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delete_goal_page:{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"delete_goal_page:{page+1}"))
+
+    if nav_buttons:
+        builder.row(*nav_buttons)
+
+    builder.row(InlineKeyboardButton(text="« В меню целей", callback_data="menu_goals"))
+    builder.adjust(1)
+    return builder.as_markup()
 
 def get_tips_categories_keyboard() -> InlineKeyboardMarkup:
     """

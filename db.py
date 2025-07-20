@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError, IntegrityError
 import random
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not set")
 
-engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=10, pool_timeout=30)
+engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=10, pool_timeout=30, pool_recycle=1800)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @contextmanager
@@ -40,7 +40,8 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
                     username TEXT,
-                    first_name TEXT
+                    first_name TEXT,
+                    timezone TEXT DEFAULT 'Asia/Almaty'
                 )
             """))
             
@@ -1006,3 +1007,101 @@ def get_user_timezone(user_id: int) -> str:
     except Exception as e:
         logger.error(f"Error getting timezone for user {user_id}: {e}")
         return 'Asia/Almaty'
+    
+def get_paginated_achievements(user_id: int, page: int = 1, per_page: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+    offset = (page - 1) * per_page
+    with get_db() as db:
+        stmt_items = text("SELECT id, achievement_name AS name FROM sport_achievements WHERE user_id = :uid ORDER BY date_earned DESC LIMIT :limit OFFSET :offset")
+        items = db.execute(stmt_items, {'uid': user_id, 'limit': per_page, 'offset': offset}).fetchall()
+        stmt_total = text("SELECT COUNT(id) FROM sport_achievements WHERE user_id = :uid")
+        total = db.execute(stmt_total, {'uid': user_id}).scalar_one()
+        return [{'id': item.id, 'name': item.name} for item in items], total
+
+def get_paginated_habits(user_id: int, page: int = 1, per_page: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+    offset = (page - 1) * per_page
+    with get_db() as db:
+        stmt_items = text("SELECT id, habit_name AS name FROM habits WHERE user_id = :uid ORDER BY id LIMIT :limit OFFSET :offset")
+        items = db.execute(stmt_items, {'uid': user_id, 'limit': per_page, 'offset': offset}).fetchall()
+        stmt_total = text("SELECT COUNT(id) FROM habits WHERE user_id = :uid")
+        total = db.execute(stmt_total, {'uid': user_id}).scalar_one()
+        return [{'id': item.id, 'name': item.name} for item in items], total
+
+def get_paginated_goals(user_id: int, page: int = 1, per_page: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+    offset = (page - 1) * per_page
+    with get_db() as db:
+        stmt_items = text("SELECT id, goal_name AS name FROM goals WHERE user_id = :uid ORDER BY start_date LIMIT :limit OFFSET :offset")
+        items = db.execute(stmt_items, {'uid': user_id, 'limit': per_page, 'offset': offset}).fetchall()
+        stmt_total = text("SELECT COUNT(id) FROM goals WHERE user_id = :uid")
+        total = db.execute(stmt_total, {'uid': user_id}).scalar_one()
+        return [{'id': item.id, 'name': item.name} for item in items], total
+
+def reset_missed_streaks():
+    """Сбрасывает стрики для целей, которые не были выполнены. Вызывается ежедневно."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    with get_db() as db:
+        try:
+            # Сброс для ежедневных целей, не выполненных вчера
+            stmt_daily = text("""
+                UPDATE goals SET streak = 0 WHERE goal_type = 'daily' AND streak > 0 AND id NOT IN (
+                    SELECT goal_id FROM goal_completions WHERE completion_date = :yesterday AND completed = true AND goal_id IS NOT NULL
+                )
+            """)
+            db.execute(stmt_daily, {'yesterday': yesterday})
+            logger.info("Reset streaks for missed daily goals.")
+
+            # Если сегодня понедельник, сброс для еженедельных целей
+            if today.weekday() == 0:
+                last_week_start = today - timedelta(days=7)
+                last_week_end = today - timedelta(days=1)
+                stmt_weekly = text("""
+                    UPDATE goals g SET streak = 0 WHERE g.goal_type = 'weekly' AND g.streak > 0 AND (
+                        SELECT COUNT(id) FROM goal_completions gc 
+                        WHERE gc.goal_id = g.id AND gc.completion_date BETWEEN :start_date AND :end_date AND gc.completed = true
+                    ) < g.target_value
+                """)
+                db.execute(stmt_weekly, {'start_date': last_week_start, 'end_date': last_week_end})
+                logger.info("Reset streaks for missed weekly goals.")
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error in reset_missed_streaks: {e}")
+            db.rollback()
+            raise
+
+def get_full_user_stats(user_id: int) -> Dict[str, Any]:
+    """Собирает всю статистику для API одним вызовом."""
+    with get_db() as db:
+        today = date.today()
+        seven_days_ago = today - timedelta(days=7)
+        
+        today_main_stats = db.execute(text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date = :today"), {'uid': user_id, 'today': today}).first()
+        if not today_main_stats: return {'today_main_stats': None}
+        
+        screen_breakdown = {r.activity_name: r.duration_minutes for r in db.execute(text("SELECT activity_name, duration_minutes FROM screen_activities WHERE user_id = :uid AND activity_date = :today"), {'uid': user_id, 'today': today})}
+        productive_breakdown = {r.activity_name: r.duration_minutes for r in db.execute(text("SELECT activity_name, duration_minutes FROM productive_activities WHERE user_id = :uid AND activity_date = :today"), {'uid': user_id, 'today': today})}
+        
+        today_goals = {r.goal_name: r.completed for r in db.execute(text("SELECT g.goal_name, gc.completed FROM goal_completions gc JOIN goals g ON gc.goal_id = g.id WHERE gc.user_id = :uid AND gc.completion_date = :today"), {'uid': user_id, 'today': today})}
+        today_habits = {r.habit_name: r.completed for r in db.execute(text("SELECT h.habit_name, hc.completed FROM habit_completions hc JOIN habits h ON hc.habit_id = h.id WHERE hc.user_id = :uid AND hc.completion_date = :today"), {'uid': user_id, 'today': today})}
+        productivity_questions = {r.question: r.answer for r in db.execute(text("SELECT question, answer FROM productivity_questions WHERE user_id = :uid AND answer_date = :today"), {'uid': user_id, 'today': today})}
+        
+        goals_data = db.execute(text("SELECT * FROM goals WHERE user_id = :uid AND is_completed = false"), {'uid': user_id}).fetchall()
+        habits_data = db.execute(text("SELECT id, habit_name as name FROM habits WHERE user_id = :uid"), {'uid': user_id}).fetchall()
+
+        history_main_stats = db.execute(text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date >= :start AND stat_date < :today ORDER BY stat_date DESC"), {'uid': user_id, 'start': seven_days_ago, 'today': today}).fetchall()
+        history_screen_time_map = {r.activity_date: r.total for r in db.execute(text("SELECT activity_date, SUM(duration_minutes) as total FROM screen_activities WHERE user_id = :uid AND activity_date >= :start AND activity_date < :today GROUP BY activity_date"), {'uid': user_id, 'start': seven_days_ago, 'today': today})}
+        history_productive_time_map = {r.activity_date: r.total for r in db.execute(text("SELECT activity_date, SUM(duration_minutes) as total FROM productive_activities WHERE user_id = :uid AND activity_date >= :start AND activity_date < :today GROUP BY activity_date"), {'uid': user_id, 'start': seven_days_ago, 'today': today})}
+
+        return {
+            'today_main_stats': today_main_stats._asdict(),
+            'today_screen_time_total': sum(screen_breakdown.values()),
+            'screen_time_breakdown': screen_breakdown,
+            'productive_time_actual': sum(productive_breakdown.values()),
+            'productive_time_breakdown': productive_breakdown,
+            'today_goals': today_goals, 'habits': today_habits,
+            'productivity_questions': productivity_questions,
+            'goals': [{'id': g.id, 'goal_name': g.goal_name, 'goal_type': g.goal_type, 'target_value': g.target_value, 'current_value': g.current_value, 'start_date': g.start_date.isoformat(), 'end_date': g.end_date.isoformat(), 'is_completed': g.is_completed, 'streak': g.streak} for g in goals_data],
+            'habits_data': [h._asdict() for h in habits_data],
+            'history': [h._asdict() for h in history_main_stats],
+            'history_screen_time_map': history_screen_time_map,
+            'history_productive_time_map': history_productive_time_map,
+        }

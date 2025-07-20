@@ -3,7 +3,7 @@ import sys
 import logging
 import signal
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import psutil
 import time
 import threading
@@ -140,7 +140,7 @@ class UserStatsResponse(BaseModel):
     today: TodayStats
     history: List[HistoryDayStats]
     goals: List[Goal]
-    habits: List[Dict[str, str]]
+    habits: List[Dict[str, Any]]
 
 # FSM состояния
 class LogActivity(StatesGroup):
@@ -308,61 +308,37 @@ async def cq_view_achievements(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "achievements_add", StateFilter("*"))
 async def cq_add_achievement(callback: CallbackQuery, state: FSMContext):
-    logger.info(f"Received callback achievements_add from user_id: {callback.from_user.id}")
-    try:
-        await state.clear()
-        await callback.message.edit_text(
-            "Введите дату достижения в формате ДД.ММ (например, 15.10):",
-            reply_markup=keyboards.get_cancel_keyboard()
-        )
-        await state.set_state(SportAchievement.choosing_date)
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Error in achievements_add for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.", reply_markup=keyboards.get_main_menu_keyboard(include_settings=True))
+    await state.clear()
+    await callback.message.edit_text("Введите дату достижения в формате ДД.ММ.ГГГГ (например, 15.10.2024):", reply_markup=keyboards.get_cancel_keyboard())
+    await state.set_state(SportAchievement.choosing_date)
+    await callback.answer()
 
 @dp.message(StateFilter(SportAchievement.choosing_date))
 async def achievement_date_chosen(message: Message, state: FSMContext):
-    logger.info(f"Achievement date chosen by user_id: {message.from_user.id}: {message.text}")
     try:
-        date_str = message.text.strip()
-        try:
-            datetime.strptime(date_str, '%d.%m')
-        except ValueError:
-            await message.answer("Ошибка. Введите дату в формате ДД.ММ (например, 15.10).", reply_markup=keyboards.get_cancel_keyboard())
-            return
-        await state.update_data(achievement_date=date_str)
+        achievement_date = datetime.strptime(message.text.strip(), '%d.%m.%Y').date()
+        await state.update_data(achievement_date=achievement_date)
         await message.answer("Опишите достижение (например, '25 подтягиваний'):", reply_markup=keyboards.get_cancel_keyboard())
         await state.set_state(SportAchievement.choosing_description)
-    except Exception as e:
-        logger.error(f"Error in achievement_date_chosen for user_id {message.from_user.id}: {e}")
-        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+    except ValueError:
+        await message.answer("Ошибка. Введите дату в формате ДД.ММ.ГГГГ.", reply_markup=keyboards.get_cancel_keyboard())
 
 @dp.message(StateFilter(SportAchievement.choosing_description))
 async def achievement_description_chosen(message: Message, state: FSMContext):
-    logger.info(f"Achievement description chosen by user_id: {message.from_user.id}: {message.text}")
     try:
         achievement_name = message.text.strip()
         user_data = await state.get_data()
-        date_str = user_data.get('achievement_date')
-        try:
-            day, month = map(int, date_str.split('.'))
-            current_year = datetime.now().year
-            date_earned = datetime(current_year, month, day).date()
-        except ValueError:
-            await message.answer("Ошибка в формате даты. Попробуйте снова с /achievements.", reply_markup=types.ReplyKeyboardRemove())
+        date_earned = user_data.get('achievement_date')
+        if not isinstance(date_earned, date):
+            await message.answer("Произошла ошибка с датой. Начните заново.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
         db.add_sport_achievement(message.from_user.id, achievement_name, date_earned)
-        await message.answer(
-            f"🏆 Достижение '{achievement_name}' ({date_earned.strftime('%d.%m.%Y')}) добавлено!",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
         await state.clear()
-        await message.answer("Что вы хотите сделать с достижениями?", reply_markup=keyboards.get_achievements_menu_keyboard())
+        await message.answer(f"🏆 Достижение '{achievement_name}' ({date_earned.strftime('%d.%m.%Y')}) добавлено!", reply_markup=keyboards.get_achievements_menu_keyboard())
     except Exception as e:
-        logger.error(f"Error in achievement_description_chosen for user_id {message.from_user.id}: {e}")
-        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+        logger.error(f"Error in achievement_description_chosen for user {message.from_user.id}: {e}")
+        await message.answer("⚠️ Ошибка.")
 
 @dp.callback_query(lambda c: c.data == "menu_goals")
 async def cq_goals_menu(callback: CallbackQuery):
@@ -578,27 +554,23 @@ async def cq_view_habits(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "achievements_delete")
 async def cq_delete_achievements_menu(callback: CallbackQuery):
-    """
-    Показывает список достижений для выбора удаления.
-    """
     logger.info(f"Received callback achievements_delete from user_id: {callback.from_user.id}")
     try:
-        with db.get_db() as db_session:
-            stmt = text("SELECT id, achievement_name, date_earned FROM sport_achievements WHERE user_id = :uid ORDER BY date_earned DESC")
-            achievements = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
-            if not achievements:
-                await callback.message.edit_text(
-                    "🏆 У вас пока нет достижений для удаления.",
-                    reply_markup=keyboards.get_achievements_menu_keyboard()
-                )
-                await callback.answer()
-                return
-            keyboard = keyboards.get_delete_achievements_keyboard(callback.from_user.id)
+        _, total_items = db.get_paginated_achievements(callback.from_user.id, page=1)
+        if total_items == 0:
             await callback.message.edit_text(
-                "Выберите достижение для удаления:",
-                reply_markup=keyboard
+                "🏆 У вас пока нет достижений для удаления.",
+                reply_markup=keyboards.get_achievements_menu_keyboard()
             )
             await callback.answer()
+            return
+        
+        keyboard = keyboards.get_delete_achievements_keyboard(callback.from_user.id, page=1)
+        await callback.message.edit_text(
+            "Выберите достижение для удаления (Страница 1):",
+            reply_markup=keyboard
+        )
+        await callback.answer()
     except Exception as e:
         logger.error(f"Error in achievements_delete for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text(
@@ -609,131 +581,127 @@ async def cq_delete_achievements_menu(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("delete_achievement_"))
 async def cq_delete_achievement(callback: CallbackQuery):
-    """
-    Удаляет выбранное достижение.
-    """
-    logger.info(f"Received callback delete_achievement for user_id: {callback.from_user.id}: {callback.data}")
     try:
         achievement_id = int(callback.data.split("_")[-1])
         db.delete_sport_achievement(callback.from_user.id, achievement_id)
-        await callback.message.edit_text(
-            "🏆 Достижение успешно удалено!",
-            reply_markup=keyboards.get_achievements_menu_keyboard()
-        )
-        await callback.answer()
+        await callback.answer("🏆 Достижение удалено!", show_alert=True)
+        # Обновляем список, вызывая родительский обработчик
+        await cq_delete_achievements_menu(callback)
     except Exception as e:
-        logger.error(f"Error deleting achievement for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text(
-            "⚠️ Ошибка при удалении достижения. Попробуйте позже.",
-            reply_markup=keyboards.get_achievements_menu_keyboard()
-        )
+        logger.error(f"Error deleting achievement: {e}")
+        await callback.answer("⚠️ Ошибка при удалении.", show_alert=True)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_achievement_page:"))
+async def cq_delete_achievement_page(callback: CallbackQuery):
+    try:
+        page = int(callback.data.split(":")[1])
+        keyboard = keyboards.get_delete_achievements_keyboard(callback.from_user.id, page)
+        await callback.message.edit_text(f"Выберите достижение для удаления (Стр. {page}):", reply_markup=keyboard)
+        await callback.answer()
+    except TelegramAPIError as e:
+        if "message is not modified" not in str(e): logger.error(e)
         await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "habits_delete")
 async def cq_delete_habits_menu(callback: CallbackQuery):
     """
-    Показывает список привычек для выбора удаления.
+    Показывает пагинированный список привычек для удаления.
     """
-    logger.info(f"Received callback habits_delete from user_id: {callback.from_user.id}")
     try:
-        habits = db.get_habits(callback.from_user.id)
-        if not habits:
+        _, total_items = db.get_paginated_habits(callback.from_user.id, page=1)
+        if total_items == 0:
             await callback.message.edit_text(
                 "📋 У вас пока нет привычек для удаления.",
                 reply_markup=keyboards.get_habits_menu_keyboard()
             )
             await callback.answer()
             return
-        keyboard = keyboards.get_delete_habits_keyboard(callback.from_user.id)
+        
+        keyboard = keyboards.get_delete_habits_keyboard(callback.from_user.id, page=1)
         await callback.message.edit_text(
-            "Выберите привычку для удаления:",
+            "Выберите привычку для удаления (Страница 1):",
             reply_markup=keyboard
         )
         await callback.answer()
     except Exception as e:
         logger.error(f"Error in habits_delete for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text(
-            "⚠️ Ошибка при загрузке привычек для удаления. Попробуйте позже.",
+            "⚠️ Ошибка при загрузке привычек для удаления.",
             reply_markup=keyboards.get_habits_menu_keyboard()
         )
-        await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("delete_habit_"))
 async def cq_delete_habit(callback: CallbackQuery):
-    """
-    Удаляет выбранную привычку.
-    """
-    logger.info(f"Received callback delete_habit for user_id: {callback.from_user.id}: {callback.data}")
     try:
         habit_id = int(callback.data.split("_")[-1])
         db.delete_habit(callback.from_user.id, habit_id)
-        await callback.message.edit_text(
-            "✅ Привычка успешно удалена!",
-            reply_markup=keyboards.get_habits_menu_keyboard()
-        )
-        await callback.answer()
+        await callback.answer("✅ Привычка удалена!", show_alert=True)
+        # Обновляем список, вызывая родительский обработчик
+        await cq_delete_habits_menu(callback)
     except Exception as e:
-        logger.error(f"Error deleting habit for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text(
-            "⚠️ Ошибка при удалении привычки. Попробуйте позже.",
-            reply_markup=keyboards.get_habits_menu_keyboard()
-        )
+        logger.error(f"Error deleting habit: {e}")
+        await callback.answer("⚠️ Ошибка при удалении.", show_alert=True)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_habit_page:"))
+async def cq_delete_habit_page(callback: CallbackQuery):
+    try:
+        page = int(callback.data.split(":")[1])
+        keyboard = keyboards.get_delete_habits_keyboard(callback.from_user.id, page)
+        await callback.message.edit_text(f"Выберите привычку для удаления (Стр. {page}):", reply_markup=keyboard)
+        await callback.answer()
+    except TelegramAPIError as e:
+        if "message is not modified" not in str(e): logger.error(e)
         await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "goals_delete")
 async def cq_delete_goals_menu(callback: CallbackQuery):
     """
-    Показывает список целей для выбора удаления.
+    Показывает пагинированный список целей для удаления.
     """
-    logger.info(f"Received callback goals_delete from user_id: {callback.from_user.id}")
     try:
-        with db.get_db() as db_session:
-            stmt = text("""
-                SELECT id, goal_name, goal_type, target_value, current_value, start_date, end_date, is_completed, streak
-                FROM goals WHERE user_id = :uid ORDER BY start_date
-            """)
-            goals = db_session.execute(stmt, {'uid': callback.from_user.id}).fetchall()
-            if not goals:
-                await callback.message.edit_text(
-                    "🎯 У вас пока нет целей для удаления.",
-                    reply_markup=keyboards.get_goals_menu_keyboard()
-                )
-                await callback.answer()
-                return
-            keyboard = keyboards.get_delete_goals_keyboard(callback.from_user.id)
+        _, total_items = db.get_paginated_goals(callback.from_user.id, page=1)
+        if total_items == 0:
             await callback.message.edit_text(
-                "Выберите цель для удаления:",
-                reply_markup=keyboard
+                "🎯 У вас пока нет целей для удаления.",
+                reply_markup=keyboards.get_goals_menu_keyboard()
             )
             await callback.answer()
+            return
+            
+        keyboard = keyboards.get_delete_goals_keyboard(callback.from_user.id, page=1)
+        await callback.message.edit_text(
+            "Выберите цель для удаления (Страница 1):",
+            reply_markup=keyboard
+        )
+        await callback.answer()
     except Exception as e:
         logger.error(f"Error in goals_delete for user_id {callback.from_user.id}: {e}")
         await callback.message.edit_text(
-            "⚠️ Ошибка при загрузке целей для удаления. Попробуйте позже.",
+            "⚠️ Ошибка при загрузке целей для удаления.",
             reply_markup=keyboards.get_goals_menu_keyboard()
         )
-        await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("delete_goal_"))
 async def cq_delete_goal(callback: CallbackQuery):
-    """
-    Удаляет выбранную цель.
-    """
-    logger.info(f"Received callback delete_goal for user_id: {callback.from_user.id}: {callback.data}")
     try:
         goal_id = int(callback.data.split("_")[-1])
         db.delete_goal(callback.from_user.id, goal_id)
-        await callback.message.edit_text(
-            "🎯 Цель успешно удалена!",
-            reply_markup=keyboards.get_goals_menu_keyboard()
-        )
-        await callback.answer()
+        await callback.answer("🎯 Цель удалена!", show_alert=True)
+        # Обновляем список, вызывая родительский обработчик
+        await cq_delete_goals_menu(callback)
     except Exception as e:
-        logger.error(f"Error deleting goal for user_id {callback.from_user.id}: {e}")
-        await callback.message.edit_text(
-            "⚠️ Ошибка при удалении цели. Попробуйте позже.",
-            reply_markup=keyboards.get_goals_menu_keyboard()
-        )
+        logger.error(f"Error deleting goal: {e}")
+        await callback.answer("⚠️ Ошибка при удалении.", show_alert=True)
+    
+@dp.callback_query(lambda c: c.data.startswith("delete_goal_page:"))
+async def cq_delete_goal_page(callback: CallbackQuery):
+    try:
+        page = int(callback.data.split(":")[1])
+        keyboard = keyboards.get_delete_goals_keyboard(callback.from_user.id, page)
+        await callback.message.edit_text(f"Выберите цель для удаления (Стр. {page}):", reply_markup=keyboard)
+        await callback.answer()
+    except TelegramAPIError as e:
+        if "message is not modified" not in str(e): logger.error(e)
         await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "menu_tips", StateFilter("*"))
@@ -1520,144 +1488,60 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
 # API endpoints
 @fastapi_app.get("/api/stats/{user_id}", response_model=UserStatsResponse)
 async def read_user_stats(user_id: int):
-    logger.info(f"API request for stats, user_id: {user_id}")
     try:
-        with db.get_db() as db_session:
-            today = date.today()
-            today_iso = today.isoformat()
-            stmt = text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date = :today")
-            today_main_stats = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).first()
-            if not today_main_stats:
-                logger.warning(f"No daily stats found for user_id: {user_id}, date: {today}")
-                raise HTTPException(status_code=404, detail="План на сегодня не найден.")
-            
-            today_main_stats_dict = today_main_stats._asdict()
-            
-            stmt = text("SELECT activity_name, duration_minutes FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
-            today_screen_activities = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
-            screen_breakdown = {row._asdict()['activity_name']: row._asdict()['duration_minutes'] for row in today_screen_activities}
-            total_screen_minutes_today = sum(screen_breakdown.values())
-            
-            stmt = text("SELECT activity_name, duration_minutes FROM productive_activities WHERE user_id = :uid AND activity_date = :today")
-            today_productive_activities = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
-            productive_breakdown = {row._asdict()['activity_name']: row._asdict()['duration_minutes'] for row in today_productive_activities}
-            total_productive_minutes_today = sum(productive_breakdown.values())
-            
-            stmt = text("""
-                SELECT g.goal_name, gc.completed
-                FROM goal_completions gc
-                JOIN goals g ON gc.goal_id = g.id
-                WHERE gc.user_id = :uid AND gc.completion_date = :today
-            """)
-            today_goals = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
-            goals = {row._asdict()['goal_name']: row._asdict()['completed'] for row in today_goals}
-            
-            stmt = text("""
-                SELECT h.habit_name, hc.completed
-                FROM habit_completions hc
-                JOIN habits h ON hc.habit_id = h.id
-                WHERE hc.user_id = :uid AND hc.completion_date = :today
-            """)
-            today_habits = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
-            habits = {row._asdict()['habit_name']: row._asdict()['completed'] for row in today_habits}
-            
-            stmt = text("SELECT question, answer FROM productivity_questions WHERE user_id = :uid AND answer_date = :today")
-            productivity_questions = db_session.execute(stmt, {'uid': user_id, 'today': today_iso}).fetchall()
-            productivity_answers = {row._asdict()['question']: row._asdict()['answer'] for row in productivity_questions}
-            
-            stmt = text("SELECT * FROM goals WHERE user_id = :uid AND is_completed = false")
-            goals_data = db_session.execute(stmt, {'uid': user_id}).fetchall()
-            goals_response = [
-                Goal(
-                    id=goal.id,
-                    goal_name=goal.goal_name,
-                    goal_type=goal.goal_type,
-                    target_value=goal.target_value,
-                    current_value=goal.current_value,
-                    start_date=goal.start_date.isoformat(),
-                    end_date=goal.end_date.isoformat(),
-                    is_completed=goal.is_completed,
-                    streak=goal.streak
-                ) for goal in goals_data
-            ]
-            
-            stmt = text("SELECT habit_name, id FROM habits WHERE user_id = :uid")
-            user_habits = db_session.execute(stmt, {'uid': user_id}).fetchall()
-            habits_data = [{'id': habit.id, 'name': habit.habit_name} for habit in user_habits]
-            
-            today_data = TodayStats(
-                screen_time_goal=today_main_stats_dict['screen_time_goal'],
-                screen_time_actual=total_screen_minutes_today,
-                screen_time_breakdown=screen_breakdown,
-                productive_time_actual=total_productive_minutes_today,
-                productive_time_breakdown=productive_breakdown,
-                workout_planned=today_main_stats_dict['workout_planned'],
-                workout_done=today_main_stats_dict['workout_done'],
-                english_planned=today_main_stats_dict['english_planned'],
-                english_done=today_main_stats_dict['english_done'],
-                coding_planned=today_main_stats_dict['coding_planned'],
-                coding_done=today_main_stats_dict['coding_done'],
-                planning_planned=today_main_stats_dict['planning_planned'],
-                planning_done=today_main_stats_dict['planning_done'],
-                stretching_planned=today_main_stats_dict['stretching_planned'],
-                stretching_done=today_main_stats_dict['stretching_done'],
-                reflection_planned=today_main_stats_dict['reflection_planned'],
-                reflection_done=today_main_stats_dict['reflection_done'],
-                walk_planned=today_main_stats_dict['walk_planned'],
-                walk_done=today_main_stats_dict['walk_done'],
-                morning_poll_completed=today_main_stats_dict['morning_poll_completed'],
-                is_rest_day=today_main_stats_dict['is_rest_day'],
-                habits=habits,
-                goals=goals,  # Добавлено
-                productivity_questions=productivity_answers
-            )
-            
-            seven_days_ago = today - timedelta(days=7)
-            stmt = text("SELECT * FROM daily_stats WHERE user_id = :uid AND stat_date >= :start AND stat_date < :today ORDER BY stat_date DESC")
-            history_main_stats = db_session.execute(stmt, {'uid': user_id, 'start': seven_days_ago.isoformat(), 'today': today_iso}).fetchall()
-            
-            stmt = text("SELECT activity_date, SUM(duration_minutes) as total_minutes FROM screen_activities WHERE user_id = :uid AND activity_date >= :start AND activity_date < :today GROUP BY activity_date")
-            history_screen_time = db_session.execute(stmt, {'uid': user_id, 'start': seven_days_ago.isoformat(), 'today': today_iso}).fetchall()
-            screen_time_map = {row._asdict()['activity_date']: row._asdict()['total_minutes'] for row in history_screen_time}
-            
-            stmt = text("SELECT activity_date, SUM(duration_minutes) as total_minutes FROM productive_activities WHERE user_id = :uid AND activity_date >= :start AND activity_date < :today GROUP BY activity_date")
-            history_productive_time = db_session.execute(stmt, {'uid': user_id, 'start': seven_days_ago.isoformat(), 'today': today_iso}).fetchall()
-            productive_time_map = {row._asdict()['activity_date']: row._asdict()['total_minutes'] for row in history_productive_time}
-            
-            history_data = [
-                HistoryDayStats(
-                    date=day_stats._asdict()['stat_date'].isoformat(),
-                    screen_time_goal=day_stats._asdict()['screen_time_goal'],
-                    screen_time_actual=screen_time_map.get(day_stats._asdict()['stat_date'], 0),
-                    productive_time_actual=productive_time_map.get(day_stats._asdict()['stat_date'], 0),
-                    workout_planned=day_stats._asdict()['workout_planned'],
-                    workout_done=day_stats._asdict()['workout_done'],
-                    english_planned=day_stats._asdict()['english_planned'],
-                    english_done=day_stats._asdict()['english_done'],
-                    coding_planned=day_stats._asdict()['coding_planned'],
-                    coding_done=day_stats._asdict()['coding_done'],
-                    planning_planned=day_stats._asdict()['planning_planned'],
-                    planning_done=day_stats._asdict()['planning_done'],
-                    stretching_planned=day_stats._asdict()['stretching_planned'],
-                    stretching_done=day_stats._asdict()['stretching_done'],
-                    reflection_planned=day_stats._asdict()['reflection_planned'],
-                    reflection_done=day_stats._asdict()['reflection_done'],
-                    walk_planned=day_stats._asdict()['walk_planned'],
-                    walk_done=day_stats._asdict()['walk_done'],
-                    is_rest_day=day_stats._asdict()['is_rest_day']
-                )
-                for day_stats in history_main_stats
-            ]
-            
-            db_session.commit()
-            
-            return UserStatsResponse(user_id=user_id, today=today_data, history=history_data, goals=goals_response, habits=habits_data)
-    except HTTPException as e:
-        logger.error(f"HTTPException in /api/stats/{user_id}: {e}")
+        stats = db.get_full_user_stats(user_id)
+        if not stats or not stats.get('today_main_stats'):
+            raise HTTPException(status_code=404, detail="План на сегодня не найден. Заполните утренний опрос /morning.")
+
+        today_main = stats['today_main_stats']
+        today_data = TodayStats(
+            screen_time_goal=today_main.get('screen_time_goal', 0),
+            screen_time_actual=stats.get('today_screen_time_total', 0),
+            screen_time_breakdown=stats.get('screen_time_breakdown', {}),
+            productive_time_actual=stats.get('productive_time_actual', 0),
+            productive_time_breakdown=stats.get('productive_time_breakdown', {}),
+            workout_planned=today_main.get('workout_planned', 0), workout_done=today_main.get('workout_done', 0),
+            english_planned=today_main.get('english_planned', 0), english_done=today_main.get('english_done', 0),
+            coding_planned=today_main.get('coding_planned', 0), coding_done=today_main.get('coding_done', 0),
+            planning_planned=today_main.get('planning_planned', 0), planning_done=today_main.get('planning_done', 0),
+            stretching_planned=today_main.get('stretching_planned', 0), stretching_done=today_main.get('stretching_done', 0),
+            reflection_planned=today_main.get('reflection_planned', 0), reflection_done=today_main.get('reflection_done', 0),
+            walk_planned=today_main.get('walk_planned', 0), walk_done=today_main.get('walk_done', 0),
+            morning_poll_completed=today_main.get('morning_poll_completed', False),
+            is_rest_day=today_main.get('is_rest_day', False),
+            habits=stats.get('habits', {}),
+            goals=stats.get('today_goals', {}),
+            productivity_questions=stats.get('productivity_questions', {})
+        )
+
+        history_data = [
+            HistoryDayStats(
+                date=day['stat_date'].isoformat(),
+                screen_time_goal=day.get('screen_time_goal', 0),
+                screen_time_actual=stats['history_screen_time_map'].get(day['stat_date'], 0),
+                productive_time_actual=stats['history_productive_time_map'].get(day['stat_date'], 0),
+                workout_planned=day.get('workout_planned', 0), workout_done=day.get('workout_done', 0),
+                english_planned=day.get('english_planned', 0), english_done=day.get('english_done', 0),
+                coding_planned=day.get('coding_planned', 0), coding_done=day.get('coding_done', 0),
+                planning_planned=day.get('planning_planned', 0), planning_done=day.get('planning_done', 0),
+                stretching_planned=day.get('stretching_planned', 0), stretching_done=day.get('stretching_done', 0),
+                reflection_planned=day.get('reflection_planned', 0), reflection_done=day.get('reflection_done', 0),
+                walk_planned=day.get('walk_planned', 0), walk_done=day.get('walk_done', 0),
+                is_rest_day=day.get('is_rest_day', False)
+            ) for day in stats['history']
+        ]
+        
+        return UserStatsResponse(
+            user_id=user_id,
+            today=today_data,
+            history=history_data,
+            goals=stats.get('goals', []),
+            habits=stats.get('habits_data', [])
+        )
+    except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in /api/stats/{user_id}: {e}")
-        db_session.rollback()
+        logger.error(f"Error in /api/stats/{user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
 
 @fastapi_app.api_route("/ping", methods=["GET", "HEAD"])
@@ -1702,11 +1586,11 @@ async def morning_poll_cron():
 
 @fastapi_app.get("/api/evening/cron")
 async def evening_summary_cron():
-    logger.info("Running evening summary CRON via GET")
-    
+    logger.info("Running evening summary CRON")
     try:
+        # Контекстный менеджер для сессии БД
         with db.get_db() as db_session:
-            # 1. Запрос изменен: получаем пользователя, его часовой пояс и статус дня отдыха
+            # ИСПРАВЛЕНИЕ 1: Добавляем ds.is_rest_day в SELECT
             stmt = text("""
                 SELECT u.user_id, u.timezone, ds.is_rest_day 
                 FROM users u 
@@ -1716,77 +1600,74 @@ async def evening_summary_cron():
             users = db_session.execute(stmt, {'today': date.today()}).fetchall()
             
             if not users:
-                logger.warning("No users with stats for today found")
+                logger.warning("No users with stats for today found for evening cron")
                 return {"status": "skipped", "message": "No users with stats for today"}
 
+            # ИСПРАВЛЕНИЕ 2: Весь последующий код теперь находится ВНУТРИ блока 'with'
             for user in users:
-                user_id = user.user_id
-                user_timezone = user.timezone or 'Asia/Almaty'  # Запасной вариант, если пояс не установлен
-                is_rest_day = user.is_rest_day
-                
-                # 2. Проверка времени теперь происходит для каждого пользователя индивидуально
-                now = pendulum.now(user_timezone)
-                if not (19 <= now.hour <= 21):
-                    logger.info(f"Skipping evening summary for user {user_id}, time is {now.hour} in {user_timezone}")
-                    continue
-                
                 try:
+                    user_id = user.user_id
+                    user_timezone = user.timezone or 'Asia/Almaty'
+                    is_rest_day = user.is_rest_day # Теперь это поле существует
+                    
+                    now = pendulum.now(user_timezone)
+                    if not (19 <= now.hour <= 21):
+                        continue
+                    
                     if is_rest_day:
-                        await bot.send_message(user_id, "🌙 В дни разгрузки данные отсутствуют.")
-                        logger.info(f"Sent rest day evening summary to user_id: {user_id}")
+                        # await bot.send_message(user_id, "🌙 Хорошего вечера в день отдыха, командир!")
+                        logger.info(f"Skipping evening poll for user {user_id} on rest day.")
                         continue
                         
                     stats = db.get_today_stats_for_user(user_id)
                     if not stats:
-                        logger.info(f"No stats for user_id: {user_id} today")
+                        logger.info(f"No stats found for user {user_id} in evening cron")
                         continue
 
-                    # Вся ваша логика формирования отчета остается - она правильная
                     time_actual = db.get_today_screen_time(user_id)
-                    time_goal = stats['screen_time_goal']
+                    time_goal = stats.get('screen_time_goal', 0)
                     time_status = "✅ В пределах лимита!" if time_actual <= time_goal else "❌ Превышен лимит!"
                     
-                    # 3. Добавляем точное время в отчет
                     report_time = now.strftime('%H:%M')
                     summary_lines = [
                         f"🌙 Вечерний отчёт на {report_time}, командир:\n",
                         f"📱 Экранное время: ~{round(time_actual / 60, 1)}ч из {time_goal // 60}ч ({time_status})\n"
                     ]
-                    def get_status(planned, done):
-                        return "не запланировано" if not planned else "✅ Выполнено!" if done else "❌ Пропущено"
+                    
+                    def get_status(planned_key, done_key):
+                        planned = stats.get(planned_key, 0)
+                        done = stats.get(done_key, 0)
+                        return "не запланировано" if not planned else ("✅ Выполнено!" if done else "❌ Пропущено")
+
                     summary_lines.extend([
-                        f"⚔️ Тренировка: {get_status(stats['workout_planned'], stats['workout_done'])}",
-                        f"🎓 Язык: {get_status(stats['english_planned'], stats['english_done'])}",
-                        f"💻 Программирование: {get_status(stats['coding_planned'], stats['coding_done'])}",
-                        f"📝 Планирование: {get_status(stats['planning_planned'], stats['planning_done'])}",
-                        f"🧘 Растяжка: {get_status(stats['stretching_planned'], stats['stretching_done'])}",
-                        f"🤔 Размышление: {get_status(stats['reflection_planned'], stats['reflection_done'])}",
-                        f"🚶 Прогулка: {get_status(stats['walk_planned'], stats['walk_done'])}"
+                        f"⚔️ Тренировка: {get_status('workout_planned', 'workout_done')}",
+                        f"🎓 Язык: {get_status('english_planned', 'english_done')}",
+                        f"💻 Программирование: {get_status('coding_planned', 'coding_done')}",
+                        f"📝 Планирование: {get_status('planning_planned', 'planning_done')}",
+                        f"🧘 Растяжка: {get_status('stretching_planned', 'stretching_done')}",
+                        f"🤔 Размышление: {get_status('reflection_planned', 'reflection_done')}",
+                        f"🚶 Прогулка: {get_status('walk_planned', 'walk_done')}"
                     ])
-                    # ... (остальная часть формирования сводки по целям и привычкам остается без изменений)
 
                     await bot.send_message(user_id, "\n".join(summary_lines))
                     db.check_and_award_achievements(user_id)
                     
-                    # 4. Логика запуска опросов теперь работает через FSM Context
                     state = FSMContext(storage=dp.storage, key=types.StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
                     
-                    habit_stmt = text("SELECT habit_name, id FROM habits WHERE user_id = :uid ORDER BY id LIMIT 1")
-                    first_habit = db_session.execute(habit_stmt, {'uid': user_id}).first()
+                    first_habit = db_session.execute(text("SELECT habit_name, id FROM habits WHERE user_id = :uid ORDER BY id LIMIT 1"), {'uid': user_id}).first()
                     if first_habit:
                         await state.set_state(EveningHabitPoll.answering_habit)
-                        await state.update_data(habit_answers={}) # Инициализируем ответы в state
+                        await state.update_data(habit_answers={})
                         await bot.send_message(
                             user_id,
                             f"📋 Выполнили ли вы привычку '{first_habit.habit_name}' сегодня?",
                             reply_markup=keyboards.get_habit_answer_keyboard(first_habit.id)
                         )
                     else:
-                        goal_stmt = text("SELECT id, goal_name FROM goals WHERE user_id = :uid AND is_completed = false ORDER BY id LIMIT 1")
-                        first_goal = db_session.execute(goal_stmt, {'uid': user_id}).first()
+                        first_goal = db_session.execute(text("SELECT id, goal_name FROM goals WHERE user_id = :uid AND is_completed = false ORDER BY id LIMIT 1"), {'uid': user_id}).first()
                         if first_goal:
                             await state.set_state(EveningGoalPoll.answering_goal)
-                            await state.update_data(goal_answers={}) # Инициализируем ответы в state
+                            await state.update_data(goal_answers={})
                             await bot.send_message(
                                 user_id,
                                 f"🎯 Выполнили ли вы цель '{first_goal.goal_name}' сегодня?",
@@ -1796,19 +1677,31 @@ async def evening_summary_cron():
                             questions = ["Что сегодня мешало быть продуктивным?", "Что дало тебе силу двигаться?", "Что ты сделаешь завтра лучше?"]
                             await state.set_state(ProductivityPoll.answering_question)
                             await state.update_data(current_question_idx=0, questions=questions, productivity_answers={})
-                            await bot.send_message(
-                                user_id,
-                                questions[0],
-                                reply_markup=keyboards.get_cancel_keyboard()
-                            )
+                            await bot.send_message(user_id, questions[0], reply_markup=keyboards.get_cancel_keyboard())
+                    
                     logger.info(f"Sent evening summary and started poll for user_id: {user_id}")
+                
                 except TelegramAPIError as e:
                     logger.error(f"Failed to send evening summary to user_id {user_id}: {e}")
-            db_session.commit()
-        return {"status": "sent"}
+                except Exception as e:
+                    logger.error(f"Generic error in evening cron for user {user_id}: {e}")
+
+        # `commit` не нужен, так как мы только читаем данные, но если бы писали - он был бы здесь
+        return {"status": "finished"}
+
     except Exception as e:
-        logger.error(f"Error in evening summary CRON: {e}")
-        db_session.rollback()
+        logger.error(f"Error in evening summary CRON task: {e}")
+        # `rollback` здесь не нужен, так как он обрабатывается в `get_db`
+        return {"status": "error", "message": str(e)}
+
+@fastapi_app.get("/api/streaks/reset/cron")
+async def daily_streaks_reset_cron():
+    logger.info("Running daily streaks reset CRON")
+    try:
+        db.reset_missed_streaks()
+        return {"status": "ok", "message": "Streaks reset successfully."}
+    except Exception as e:
+        logger.error(f"Error in daily streaks reset CRON: {e}")
         return {"status": "error", "message": str(e)}
     
 @fastapi_app.get("/api/afternoon/cron")
