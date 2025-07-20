@@ -1719,7 +1719,7 @@ async def read_user_stats(user_id: int):
             
             history_data = [
                 HistoryDayStats(
-                    date=day_stats._asdict()['stat_date'],
+                    date=day_stats._asdict()['stat_date'].isoformat(),
                     screen_time_goal=day_stats._asdict()['screen_time_goal'],
                     screen_time_actual=screen_time_map.get(day_stats._asdict()['stat_date'], 0),
                     productive_time_actual=productive_time_map.get(day_stats._asdict()['stat_date'], 0),
