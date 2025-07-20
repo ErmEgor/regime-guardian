@@ -1819,7 +1819,7 @@ async def evening_summary_cron():
                         continue
                     time_actual = db.get_today_screen_time(user_id)
                     time_goal = stats['screen_time_goal']
-                    time_status = "✅ В пределах лимита!" if time_actual / 60 <= time_goal else "❌ Превышен лимит!"
+                    time_status = "✅ В пределах лимита!" if time_actual <= time_goal else "❌ Превышен лимит!"
                     summary_lines = [
                         "🌙 Вечерний отчёт, командир:\n",
                         f"📱 Экранное время: ~{round(time_actual / 60, 1)}ч из {time_goal // 60}ч ({time_status})\n"
