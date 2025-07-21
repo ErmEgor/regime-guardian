@@ -8,6 +8,7 @@ import psutil
 import time
 import threading
 import pendulum
+import traceback
 from datetime import datetime
 
 # Временный обход для импорта keyboards и db
@@ -36,6 +37,8 @@ from urllib.parse import parse_qsl
 
 import db
 import keyboards
+
+ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
 
 TIMEZONE = "Asia/Almaty"
 
@@ -1734,7 +1737,20 @@ async def evening_summary_cron():
                 except TelegramAPIError as e:
                     logger.error(f"Failed to send evening summary to user_id {user_id}: {e}")
                 except Exception as e:
-                    logger.error(f"Generic error in evening cron for user {user_id}: {e}")
+                     logger.error(f"CRON JOB FAILED for user {user_id}: {e}", exc_info=True)
+                     if ADMIN_ID:
+                        # Формируем детальное сообщение об ошибке
+                        error_message = (
+                            f"‼️ <b>Сбой в вечерней CRON-задаче!</b>\n\n"
+                            f"<b>Пользователь:</b> <code>{user_id}</code>\n"
+                            f"<b>Ошибка:</b> <code>{e}</code>\n\n"
+                            f"<b>Traceback:</b>\n<pre>{traceback.format_exc()}</pre>"
+                        )
+                        # Пытаемся отправить сообщение администратору
+                        try:
+                            await bot.send_message(ADMIN_ID, error_message)
+                        except Exception as admin_send_error:
+                            logger.error(f"COULD NOT SEND CRON ERROR TO ADMIN: {admin_send_error}")
 
         # `commit` не нужен, так как мы только читаем данные, но если бы писали - он был бы здесь
         return {"status": "finished"}
