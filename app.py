@@ -1528,7 +1528,7 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
 
-# --- НОВЫЙ ОБРАБОТЧИК: СМЕНА ЧАСОВОГО ПОЯСА ---
+# --- СМЕНА ЧАСОВОГО ПОЯСА ---
 @dp.callback_query(lambda c: c.data.startswith("tz_set_"))
 async def cq_set_timezone(callback: CallbackQuery):
     try:
@@ -1551,6 +1551,30 @@ async def cq_set_timezone(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error setting timezone for user {callback.from_user.id}: {e}")
         await callback.answer("⚠️ Ошибка при смене часового пояса.", show_alert=True)
+
+# --- МЕНЮ НАСТРОЕК ---
+@dp.callback_query(lambda c: c.data == "menu_settings")
+async def cq_settings_menu(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    logger.info(f"Received settings menu request from user_id: {user_id}")
+    try:
+        # Получаем текущий часовой пояс пользователя из БД, чтобы отобразить его
+        current_tz = db.get_user_timezone(user_id)
+        
+        # Создаем клавиатуру с актуальным часовым поясом
+        settings_keyboard = keyboards.get_settings_keyboard(current_tz)
+        
+        await callback.message.edit_text(
+            "⚙️ <b>Меню настроек</b>\n\nЗдесь вы можете изменить свой часовой пояс. "
+            "Это нужно для корректной работы утренних и вечерних уведомлений.",
+            reply_markup=settings_keyboard
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in settings menu for user_id {user_id}: {e}")
+        await callback.message.answer("⚠️ Ошибка. Попробуйте позже.")
+        await callback.answer()
 
 # --- ФУНКЦИЯ ДЛЯ ЗАЩИТЫ CRON ---
 async def verify_cron_secret(x_cron_secret: Optional[str] = Header(None, alias="X-Cron-Secret")):
