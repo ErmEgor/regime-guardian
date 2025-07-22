@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import signal
+import pytz
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Any
 import psutil
@@ -1527,6 +1528,31 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
 # API endpoints
+@fastapi_app.get("/api/cron-test")
+async def cron_test_endpoint():
+    """
+    Этот эндпоинт не делает НИЧЕГО, кроме отправки
+    мгновенного сообщения администратору.
+    Он нужен, чтобы проверить, доходит ли cron-запрос вообще.
+    """
+    logger.info("CRON-TEST ENDPOINT WAS HIT!")
+    if ADMIN_ID:
+        try:
+            now_almaty = datetime.now(pytz.timezone('Asia/Almaty'))
+            time_str = now_almaty.strftime('%Y-%m-%d %H:%M:%S')
+
+            await bot.send_message(
+                ADMIN_ID,
+                f"✅ **Тестовый Cron-запрос получен!**\n\n"
+                f"<b>Время на сервере (Almaty):</b> <code>{time_str}</code>\n\n"
+                f"Это значит, что Render проснулся и бот работает."
+            )
+            return {"status": "ok", "message_sent_to_admin": True}
+        except Exception as e:
+            logger.error(f"CRON-TEST FAILED TO SEND MESSAGE: {e}", exc_info=True)
+            return {"status": "error", "message": "Could not send Telegram message"}
+    return {"status": "ok", "message": "Admin ID not configured"}
+
 @fastapi_app.post("/api/stats", response_model=UserStatsResponse)
 async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data")):
     # 1. Валидируем initData
