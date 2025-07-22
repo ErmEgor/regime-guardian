@@ -356,6 +356,7 @@ def get_settings_keyboard(current_tz: str) -> InlineKeyboardMarkup:
     builder.button(text=f"Текущий пояс: {current_tz}", callback_data="dummy_tz")
     builder.button(text="Europe/Moscow (UTC+3)", callback_data="tz_set_Europe/Moscow")
     builder.button(text="Asia/Almaty (UTC+5)", callback_data="tz_set_Asia/Almaty")
+    builder.button(text="Europe/Berlin (UTC+2)", callback_data="tz_set_Europe/Berlin")
     builder.button(text="« Назад в меню", callback_data="menu_back")
     builder.adjust(1)
     return builder.as_markup()

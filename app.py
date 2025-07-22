@@ -34,7 +34,7 @@ from redis.asyncio.client import Redis
 import hmac
 import hashlib
 import json
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, unquote
 
 import db
 import keyboards
@@ -1528,6 +1528,7 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
 
+# --- НОВЫЙ ОБРАБОТЧИК: СМЕНА ЧАСОВОГО ПОЯСА ---
 @dp.callback_query(lambda c: c.data.startswith("tz_set_"))
 async def cq_set_timezone(callback: CallbackQuery):
     try:
@@ -1538,9 +1539,12 @@ async def cq_set_timezone(callback: CallbackQuery):
         # Сохраняем в базу данных
         db.set_user_timezone(user_id, new_timezone)
         
+        # Обновляем клавиатуру настроек, чтобы показать новый выбранный пояс
+        new_settings_keyboard = keyboards.get_settings_keyboard(new_timezone)
+        
         await callback.message.edit_text(
-            f"✅ Ваш часовой пояс изменен на: <b>{new_timezone}</b>.",
-            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+            f"✅ Ваш часовой пояс изменен на: <b>{new_timezone}</b>.\n\nВозвращаю в меню настроек.",
+            reply_markup=new_settings_keyboard
         )
         await callback.answer("Часовой пояс обновлен!")
         
@@ -1673,9 +1677,10 @@ async def handle_ping(request: Request):
 #        logger.error(f"Error in morning poll CRON: {e}")
 #        return {"status": "error", "message": str(e)}
 
-@fastapi_app.get("/api/evening/cron", dependencies=[Depends(verify_cron_secret)])
-async def evening_summary_cron():
-    logger.info("Running evening summary CRON")
+@fastapi_app.get("/api/evening/cron/{timezone_url:path}", dependencies=[Depends(verify_cron_secret)])
+async def evening_summary_cron(timezone_url: str):
+    user_timezone = unquote(timezone_url).replace('-', '/')
+    logger.info(f"Running evening summary CRON for timezone: {user_timezone}")
     if ADMIN_ID:
         try:
             now_almaty = datetime.now(pytz.timezone('Asia/Almaty')).strftime('%H:%M:%S')
@@ -1689,26 +1694,21 @@ async def evening_summary_cron():
                 SELECT u.user_id, u.timezone, ds.is_rest_day 
                 FROM users u 
                 JOIN daily_stats ds ON u.user_id = ds.user_id 
-                WHERE ds.stat_date = :today
+                WHERE ds.stat_date = :today AND u.timezone = :tz
             """)
-            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
+            users = db_session.execute(stmt, {'today': date.today(), 'tz': user_timezone}).fetchall()
             
             if not users:
                 logger.warning("No users with stats for today found for evening cron")
                 return {"status": "skipped", "message": "No users with stats for today"}
 
-            # ИСПРАВЛЕНИЕ 2: Весь последующий код теперь находится ВНУТРИ блока 'with'
             for user in users:
                 try:
                     user_id = user.user_id
-                    user_timezone = user.timezone or 'Asia/Almaty'
-                    is_rest_day = user.is_rest_day # Теперь это поле существует
-                    
-                    now = pendulum.now(user_timezone)
-                    if not (20 <= now.hour <= 22):
+                    if user.is_rest_day:
                         continue
                     
-                    if is_rest_day:
+                    if user.is_rest_day:
                         # await bot.send_message(user_id, "🌙 Хорошего вечера в день отдыха, командир!")
                         logger.info(f"Skipping evening poll for user {user_id} on rest day.")
                         continue
@@ -1718,6 +1718,7 @@ async def evening_summary_cron():
                         logger.info(f"No stats found for user {user_id} in evening cron")
                         continue
 
+                    now = pendulum.now(user_timezone)
                     time_actual = db.get_today_screen_time(user_id)
                     time_goal = stats.get('screen_time_goal', 0)
                     time_status = "✅ В пределах лимита!" if time_actual <= time_goal else "❌ Превышен лимит!"
@@ -1819,9 +1820,10 @@ async def daily_streaks_reset_cron():
             await bot.send_message(ADMIN_ID, error_message)
         return {"status": "error", "message": str(e)}
     
-@fastapi_app.get("/api/afternoon/cron", dependencies=[Depends(verify_cron_secret)])
-async def afternoon_reminder_cron():
-    logger.info("Running afternoon reminder CRON via GET")
+@fastapi_app.get("/api/afternoon/cron/{timezone_url:path}", dependencies=[Depends(verify_cron_secret)])
+async def afternoon_reminder_cron(timezone_url: str):
+    user_timezone = unquote(timezone_url).replace('-', '/')
+    logger.info(f"Running afternoon reminder CRON for timezone: {user_timezone}")
     if ADMIN_ID:
         try:
             now_almaty = datetime.now(pytz.timezone('Asia/Almaty')).strftime('%H:%M:%S')
@@ -1835,17 +1837,16 @@ async def afternoon_reminder_cron():
                 SELECT u.user_id, u.timezone, ds.is_rest_day, ds.morning_poll_completed 
                 FROM users u 
                 JOIN daily_stats ds ON u.user_id = ds.user_id 
-                WHERE ds.stat_date = :today
+                WHERE ds.stat_date = :today AND u.timezone = :tz
             """)
-            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
+            users = db_session.execute(stmt, {'today': date.today(), 'tz': user_timezone}).fetchall()
             if not users:
+                logger.info(f"No users to remind in timezone {user_timezone}")
                 return {"status": "skipped", "message": "No users with stats for today"}
 
             for user in users:
-                user_id, user_timezone = user.user_id, user.timezone or 'Asia/Almaty'
-                now = pendulum.now(user_timezone)
-
-                if not (19 <= now.hour <= 21):
+                user_id = user.user_id
+                if user.is_rest_day or not user.morning_poll_completed:
                     continue
 
                 if user.is_rest_day:
