@@ -1333,6 +1333,26 @@ async def cmd_help(message: Message, state: FSMContext):
             reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
         )
 
+# ЗАМЕНИТЬ НА ЭТОТ БЛОК В app.py
+
+@dp.message(Command("settings"))
+async def cmd_settings(message: Message):
+    user_id = message.from_user.id
+    logger.info(f"Received /settings from user_id: {user_id}")
+    try:
+        # ИЗМЕНЕНО: Мы получаем реальный часовой пояс пользователя из БД.
+        current_tz = db.get_user_timezone(user_id)
+        
+        await message.answer(
+            "⚙️ <b>Меню настроек</b>\n\nЗдесь вы можете изменить свой часовой пояс. "
+            "Это нужно для корректной работы утренних и вечерних уведомлений.",
+            # И передаем его в клавиатуру, чтобы отобразить актуальное значение.
+            reply_markup=keyboards.get_settings_keyboard(current_tz)
+        )
+    except Exception as e:
+        logger.error(f"Error in /settings for user_id {user_id}: {e}")
+        await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+
 @dp.callback_query(lambda c: c.data == "menu_help", StateFilter("*"))
 async def cq_help_menu(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Received callback menu_help from user_id: {callback.from_user.id}")

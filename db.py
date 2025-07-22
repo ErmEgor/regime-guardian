@@ -274,9 +274,11 @@ def add_user(user_id: int, username: str, first_name: str):
     try:
         with get_db() as db:
             db.execute(text("""
-                INSERT INTO users (user_id, username, first_name)
-                VALUES (:user_id, :username, :first_name)
-                ON CONFLICT (user_id) DO NOTHING
+                INSERT INTO users (user_id, username, first_name, timezone)
+                VALUES (:user_id, :username, :first_name, 'Asia/Almaty')
+                ON CONFLICT (user_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name;
             """), {'user_id': user_id, 'username': username, 'first_name': first_name})
             db.commit()
             logger.info(f"Added/updated user {user_id}")
