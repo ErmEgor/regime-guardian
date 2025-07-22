@@ -1810,7 +1810,7 @@ async def afternoon_reminder_cron():
                 user_id, user_timezone = user.user_id, user.timezone or 'Asia/Almaty'
                 now = pendulum.now(user_timezone)
 
-                if not (18 <= now.hour <= 20):
+                if not (19 <= now.hour <= 21):
                     continue
 
                 if user.is_rest_day:
