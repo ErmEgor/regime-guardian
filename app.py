@@ -1681,7 +1681,7 @@ async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Teleg
         logger.error(f"Error in /api/stats/{user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
 
-@fastapi_app.api_route("/ping", methods=["GET", "HEAD"], dependencies=[Depends(verify_cron_secret)])
+@fastapi_app.api_route("/ping", methods=["GET", "HEAD"])
 async def handle_ping(request: Request):
     logger.info(f"Received {request.method} /ping request from {request.client.host}")
     return {"status": "ok"}
