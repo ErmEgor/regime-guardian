@@ -2,7 +2,6 @@ import os
 import sys
 import logging
 import signal
-import pytz
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Any
 import psutil
@@ -1528,31 +1527,6 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
 # API endpoints
-@fastapi_app.get("/api/cron-test")
-async def cron_test_endpoint():
-    """
-    Этот эндпоинт не делает НИЧЕГО, кроме отправки
-    мгновенного сообщения администратору.
-    Он нужен, чтобы проверить, доходит ли cron-запрос вообще.
-    """
-    logger.info("CRON-TEST ENDPOINT WAS HIT!")
-    if ADMIN_ID:
-        try:
-            now_almaty = datetime.now(pytz.timezone('Asia/Almaty'))
-            time_str = now_almaty.strftime('%Y-%m-%d %H:%M:%S')
-
-            await bot.send_message(
-                ADMIN_ID,
-                f"✅ **Тестовый Cron-запрос получен!**\n\n"
-                f"<b>Время на сервере (Almaty):</b> <code>{time_str}</code>\n\n"
-                f"Это значит, что Render проснулся и бот работает."
-            )
-            return {"status": "ok", "message_sent_to_admin": True}
-        except Exception as e:
-            logger.error(f"CRON-TEST FAILED TO SEND MESSAGE: {e}", exc_info=True)
-            return {"status": "error", "message": "Could not send Telegram message"}
-    return {"status": "ok", "message": "Admin ID not configured"}
-
 @fastapi_app.post("/api/stats", response_model=UserStatsResponse)
 async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data")):
     # 1. Валидируем initData
@@ -1663,127 +1637,89 @@ async def handle_ping(request: Request):
 #        logger.error(f"Error in morning poll CRON: {e}")
 #        return {"status": "error", "message": str(e)}
 
+# app.py
+
 @fastapi_app.get("/api/evening/cron")
 async def evening_summary_cron():
-    logger.info("Running evening summary CRON")
+    logger.info("Running evening summary CRON - STEP 0: Entry point")
+    if ADMIN_ID: await bot.send_message(ADMIN_ID, "EVENING CRON: STEP 0 - Entry point")
+
     try:
-        # Контекстный менеджер для сессии БД
+        logger.info("EVENING CRON: STEP 1 - Entering main try block")
+        if ADMIN_ID: await bot.send_message(ADMIN_ID, "EVENING CRON: STEP 1 - Entering main try block")
+
         with db.get_db() as db_session:
-            # ИСПРАВЛЕНИЕ 1: Добавляем ds.is_rest_day в SELECT
+            logger.info("EVENING CRON: STEP 2 - Database session opened")
+            if ADMIN_ID: await bot.send_message(ADMIN_ID, "EVENING CRON: STEP 2 - Database session opened")
+
             stmt = text("""
-                SELECT u.user_id, u.timezone, ds.is_rest_day 
-                FROM users u 
-                JOIN daily_stats ds ON u.user_id = ds.user_id 
+                SELECT u.user_id, u.timezone, ds.is_rest_day
+                FROM users u
+                JOIN daily_stats ds ON u.user_id = ds.user_id
                 WHERE ds.stat_date = :today
             """)
-            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
             
+            logger.info("EVENING CRON: STEP 3 - Executing SQL query")
+            if ADMIN_ID: await bot.send_message(ADMIN_ID, "EVENING CRON: STEP 3 - Executing SQL query")
+
+            users = db_session.execute(stmt, {'today': date.today()}).fetchall()
+
+            logger.info(f"EVENING CRON: STEP 4 - SQL query finished, found {len(users)} users")
+            if ADMIN_ID: await bot.send_message(ADMIN_ID, f"EVENING CRON: STEP 4 - SQL query finished, found {len(users)} users")
+
             if not users:
                 logger.warning("No users with stats for today found for evening cron")
                 return {"status": "skipped", "message": "No users with stats for today"}
 
-            # ИСПРАВЛЕНИЕ 2: Весь последующий код теперь находится ВНУТРИ блока 'with'
             for user in users:
+                user_id = user.user_id
                 try:
-                    user_id = user.user_id
+                    logger.info(f"EVENING CRON: STEP 5 - Processing user {user_id}")
+                    if ADMIN_ID: await bot.send_message(ADMIN_ID, f"EVENING CRON: STEP 5 - Processing user {user_id}")
+                    
+                    # ... (здесь вся остальная логика, которая у тебя была внутри цикла)
                     user_timezone = user.timezone or 'Asia/Almaty'
-                    is_rest_day = user.is_rest_day # Теперь это поле существует
-                    
+                    is_rest_day = user.is_rest_day
                     now = pendulum.now(user_timezone)
-                    if not (19 <= now.hour <= 21):
-                        continue
                     
+                    # ВРЕМЕННО УБИРАЕМ ПРОВЕРКУ ВРЕМЕНИ ДЛЯ ТЕСТА
+                    # if not (19 <= now.hour <= 21):
+                    #    continue
+
                     if is_rest_day:
-                        # await bot.send_message(user_id, "🌙 Хорошего вечера в день отдыха, командир!")
-                        logger.info(f"Skipping evening poll for user {user_id} on rest day.")
+                        logger.info(f"Skipping rest day user {user_id}")
                         continue
-                        
-                    stats = db.get_today_stats_for_user(user_id)
-                    if not stats:
-                        logger.info(f"No stats found for user {user_id} in evening cron")
-                        continue
+                    
+                    # ... остальной код для формирования и отправки сводки
+                    await bot.send_message(user_id, "Ваша вечерняя сводка...") # Пример
+                    logger.info(f"EVENING CRON: STEP 6 - Successfully sent summary to {user_id}")
+                    if ADMIN_ID: await bot.send_message(ADMIN_ID, f"EVENING CRON: STEP 6 - Successfully sent summary to {user_id}")
 
-                    time_actual = db.get_today_screen_time(user_id)
-                    time_goal = stats.get('screen_time_goal', 0)
-                    time_status = "✅ В пределах лимита!" if time_actual <= time_goal else "❌ Превышен лимит!"
-                    
-                    report_time = now.strftime('%H:%M')
-                    summary_lines = [
-                        f"🌙 Вечерний отчёт на {report_time}, командир:\n",
-                        f"📱 Экранное время: ~{round(time_actual / 60, 1)}ч из {time_goal // 60}ч ({time_status})\n"
-                    ]
-                    
-                    def get_status(planned_key, done_key):
-                        planned = stats.get(planned_key, 0)
-                        done = stats.get(done_key, 0)
-                        return "не запланировано" if not planned else ("✅ Выполнено!" if done else "❌ Пропущено")
 
-                    summary_lines.extend([
-                        f"⚔️ Тренировка: {get_status('workout_planned', 'workout_done')}",
-                        f"🎓 Язык: {get_status('english_planned', 'english_done')}",
-                        f"💻 Программирование: {get_status('coding_planned', 'coding_done')}",
-                        f"📝 Планирование: {get_status('planning_planned', 'planning_done')}",
-                        f"🧘 Растяжка: {get_status('stretching_planned', 'stretching_done')}",
-                        f"🤔 Размышление: {get_status('reflection_planned', 'reflection_done')}",
-                        f"🚶 Прогулка: {get_status('walk_planned', 'walk_done')}"
-                    ])
-
-                    await bot.send_message(user_id, "\n".join(summary_lines))
-                    db.check_and_award_achievements(user_id)
-                    
-                    state = FSMContext(storage=dp.storage, key=types.StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
-                    
-                    first_habit = db_session.execute(text("SELECT habit_name, id FROM habits WHERE user_id = :uid ORDER BY id LIMIT 1"), {'uid': user_id}).first()
-                    if first_habit:
-                        await state.set_state(EveningHabitPoll.answering_habit)
-                        await state.update_data(habit_answers={})
-                        await bot.send_message(
-                            user_id,
-                            f"📋 Выполнили ли вы привычку '{first_habit.habit_name}' сегодня?",
-                            reply_markup=keyboards.get_habit_answer_keyboard(first_habit.id)
-                        )
-                    else:
-                        first_goal = db_session.execute(text("SELECT id, goal_name FROM goals WHERE user_id = :uid AND is_completed = false ORDER BY id LIMIT 1"), {'uid': user_id}).first()
-                        if first_goal:
-                            await state.set_state(EveningGoalPoll.answering_goal)
-                            await state.update_data(goal_answers={})
-                            await bot.send_message(
-                                user_id,
-                                f"🎯 Выполнили ли вы цель '{first_goal.goal_name}' сегодня?",
-                                reply_markup=keyboards.get_goal_answer_keyboard(first_goal.id)
-                            )
-                        else:
-                            questions = ["Что сегодня мешало быть продуктивным?", "Что дало тебе силу двигаться?", "Что ты сделаешь завтра лучше?"]
-                            await state.set_state(ProductivityPoll.answering_question)
-                            await state.update_data(current_question_idx=0, questions=questions, productivity_answers={})
-                            await bot.send_message(user_id, questions[0], reply_markup=keyboards.get_cancel_keyboard())
-                    
-                    logger.info(f"Sent evening summary and started poll for user_id: {user_id}")
-                
-                except TelegramAPIError as e:
-                    logger.error(f"Failed to send evening summary to user_id {user_id}: {e}")
                 except Exception as e:
-                     logger.error(f"CRON JOB FAILED for user {user_id}: {e}", exc_info=True)
-                     if ADMIN_ID:
-                        # Формируем детальное сообщение об ошибке
+                    logger.error(f"CRON JOB FAILED for user {user_id}: {e}", exc_info=True)
+                    if ADMIN_ID:
                         error_message = (
-                            f"‼️ <b>Сбой в вечерней CRON-задаче!</b>\n\n"
+                            f"‼️ <b>Сбой в цикле для пользователя!</b>\n\n"
                             f"<b>Пользователь:</b> <code>{user_id}</code>\n"
                             f"<b>Ошибка:</b> <code>{e}</code>\n\n"
                             f"<b>Traceback:</b>\n<pre>{traceback.format_exc()}</pre>"
                         )
-                        # Пытаемся отправить сообщение администратору
-                        try:
-                            await bot.send_message(ADMIN_ID, error_message)
-                        except Exception as admin_send_error:
-                            logger.error(f"COULD NOT SEND CRON ERROR TO ADMIN: {admin_send_error}")
-
-        # `commit` не нужен, так как мы только читаем данные, но если бы писали - он был бы здесь
+                        await bot.send_message(ADMIN_ID, error_message)
+        
+        logger.info("EVENING CRON: FINAL STEP - Task finished")
+        if ADMIN_ID: await bot.send_message(ADMIN_ID, "EVENING CRON: FINAL STEP - Task finished")
         return {"status": "finished"}
 
     except Exception as e:
-        logger.error(f"Error in evening summary CRON task: {e}")
-        # `rollback` здесь не нужен, так как он обрабатывается в `get_db`
+        logger.error(f"Error in evening summary CRON task: {e}", exc_info=True)
+        if ADMIN_ID:
+            error_message = (
+                f"‼️ <b>КРИТИЧЕСКИЙ СБОЙ ВНЕ ЦИКЛА!</b>\n\n"
+                f"<b>Ошибка:</b> <code>{e}</code>\n\n"
+                f"<b>Traceback:</b>\n<pre>{traceback.format_exc()}</pre>"
+            )
+            await bot.send_message(ADMIN_ID, error_message)
         return {"status": "error", "message": str(e)}
 
 @fastapi_app.get("/api/streaks/reset/cron")
