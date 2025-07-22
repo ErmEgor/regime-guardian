@@ -1528,6 +1528,26 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
 
+@dp.callback_query(lambda c: c.data.startswith("tz_set_"))
+async def cq_set_timezone(callback: CallbackQuery):
+    try:
+        # Извлекаем часовой пояс из callback_data (например, "tz_set_Europe/Moscow")
+        new_timezone = callback.data.split('_', 2)[2]
+        user_id = callback.from_user.id
+        
+        # Сохраняем в базу данных
+        db.set_user_timezone(user_id, new_timezone)
+        
+        await callback.message.edit_text(
+            f"✅ Ваш часовой пояс изменен на: <b>{new_timezone}</b>.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await callback.answer("Часовой пояс обновлен!")
+        
+    except Exception as e:
+        logger.error(f"Error setting timezone for user {callback.from_user.id}: {e}")
+        await callback.answer("⚠️ Ошибка при смене часового пояса.", show_alert=True)
+
 # --- ФУНКЦИЯ ДЛЯ ЗАЩИТЫ CRON ---
 async def verify_cron_secret(x_cron_secret: Optional[str] = Header(None, alias="X-Cron-Secret")):
     """
