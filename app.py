@@ -24,7 +24,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramAPIError
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.sql import text
@@ -54,6 +54,7 @@ load_dotenv()
 
 # Конфигурация
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+CRON_SECRET = os.getenv("CRON_SECRET")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен в .env")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://your-frontend-render-url")
@@ -1527,8 +1528,22 @@ async def cq_back_from_help(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
 
+# --- ФУНКЦИЯ ДЛЯ ЗАЩИТЫ CRON ---
+async def verify_cron_secret(x_cron_secret: Optional[str] = Header(None, alias="X-Cron-Secret")):
+    """
+    Проверяет, что запрос к CRON содержит правильный секретный заголовок.
+    """
+    if not CRON_SECRET:
+        # Эта ошибка означает, что сервер настроен неверно.
+        logger.error("CRON_SECRET не установлен в переменных окружения. Эндпоинты CRON не защищены.")
+        raise HTTPException(status_code=500, detail="CRON secret not configured on server.")
+    
+    if x_cron_secret != CRON_SECRET:
+        logger.warning(f"Попытка неавторизованного доступа к CRON с неверным секретом: {x_cron_secret}")
+        raise HTTPException(status_code=403, detail="Invalid or missing CRON secret.")
+
 # API endpoints
-@fastapi_app.post("/api/stats", response_model=UserStatsResponse)
+@fastapi_app.post("/api/stats", response_model=UserStatsResponse, dependencies=[Depends(verify_cron_secret)])
 async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data")):
     # 1. Валидируем initData
     user_data_from_telegram = validate_init_data(x_telegram_init_data, BOT_TOKEN)
@@ -1598,12 +1613,12 @@ async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Teleg
         logger.error(f"Error in /api/stats/{user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
 
-@fastapi_app.api_route("/ping", methods=["GET", "HEAD"])
+@fastapi_app.api_route("/ping", methods=["GET", "HEAD"], dependencies=[Depends(verify_cron_secret)])
 async def handle_ping(request: Request):
     logger.info(f"Received {request.method} /ping request from {request.client.host}")
     return {"status": "ok"}
 
-#@fastapi_app.get("/api/morning/cron")
+#@fastapi_app.get("/api/morning/cron", dependencies=[Depends(verify_cron_secret)])
 #async def morning_poll_cron():
 #    logger.info("Running morning poll CRON via GET")
 #    try:
@@ -1638,7 +1653,7 @@ async def handle_ping(request: Request):
 #        logger.error(f"Error in morning poll CRON: {e}")
 #        return {"status": "error", "message": str(e)}
 
-@fastapi_app.get("/api/evening/cron")
+@fastapi_app.get("/api/evening/cron", dependencies=[Depends(verify_cron_secret)])
 async def evening_summary_cron():
     logger.info("Running evening summary CRON")
     if ADMIN_ID:
@@ -1766,7 +1781,7 @@ async def evening_summary_cron():
         # `rollback` здесь не нужен, так как он обрабатывается в `get_db`
         return {"status": "error", "message": str(e)}
 
-@fastapi_app.get("/api/streaks/reset/cron")
+@fastapi_app.get("/api/streaks/reset/cron", dependencies=[Depends(verify_cron_secret)])
 async def daily_streaks_reset_cron():
     logger.info("Running daily streaks reset CRON")
     if ADMIN_ID:
@@ -1784,7 +1799,7 @@ async def daily_streaks_reset_cron():
             await bot.send_message(ADMIN_ID, error_message)
         return {"status": "error", "message": str(e)}
     
-@fastapi_app.get("/api/afternoon/cron")
+@fastapi_app.get("/api/afternoon/cron", dependencies=[Depends(verify_cron_secret)])
 async def afternoon_reminder_cron():
     logger.info("Running afternoon reminder CRON via GET")
     if ADMIN_ID:
@@ -1876,7 +1891,7 @@ async def afternoon_reminder_cron():
             await bot.send_message(ADMIN_ID, error_message)
         return {"status": "error", "message": str(e)}
     
-@fastapi_app.get("/api/daily_reset/cron")
+@fastapi_app.get("/api/daily_reset/cron", dependencies=[Depends(verify_cron_secret)])
 async def daily_reset_cron():
     logger.info("Running daily goals reset CRON via GET")
     if ADMIN_ID:
