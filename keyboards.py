@@ -424,3 +424,17 @@ def get_help_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_habit_answer_keyboard(habit_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для ответа на вопрос о выполнении привычки.
+    """
+    logger.debug(f"Creating habit answer keyboard for habit_id: {habit_id}")
+    buttons = [
+        [
+            InlineKeyboardButton(text="✅ Да", callback_data=f"habit_answer_{habit_id}_yes"),
+            InlineKeyboardButton(text="❌ Нет", callback_data=f"habit_answer_{habit_id}_no")
+        ],
+        [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
