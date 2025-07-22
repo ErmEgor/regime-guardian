@@ -1793,7 +1793,7 @@ async def evening_summary_cron(timezone_url: str):
                     await bot.send_message(user_id, "\n".join(summary_lines))
                     db.check_and_award_achievements(user_id)
                     
-                    state = FSMContext(storage=dp.storage, key=types.StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+                    state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
                     
                     first_habit = db_session.execute(text("SELECT habit_name, id FROM habits WHERE user_id = :uid ORDER BY id LIMIT 1"), {'uid': user_id}).first()
                     if first_habit:
