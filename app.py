@@ -1611,7 +1611,7 @@ async def verify_cron_secret(x_cron_secret: Optional[str] = Header(None, alias="
         raise HTTPException(status_code=403, detail="Invalid or missing CRON secret.")
 
 # API endpoints
-@fastapi_app.post("/api/stats", response_model=UserStatsResponse, dependencies=[Depends(verify_cron_secret)])
+@fastapi_app.post("/api/stats", response_model=UserStatsResponse)
 async def read_user_stats(x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data")):
     # 1. Валидируем initData
     user_data_from_telegram = validate_init_data(x_telegram_init_data, BOT_TOKEN)
