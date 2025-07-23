@@ -18,13 +18,14 @@ def get_main_menu_keyboard(include_settings: bool = False) -> InlineKeyboardMark
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отметить выполнение", callback_data="menu_mark_done")
     builder.button(text="✍️ Записать активность", callback_data="menu_log_activity")
-    builder.button(text="📊 Статистика", callback_data="menu_stats")
     builder.button(text="🏆 Достижения", callback_data="menu_achievements")
     builder.button(text="📋 Привычки", callback_data="menu_habits")
     builder.button(text="🎯 Цели", callback_data="menu_goals")
+    builder.button(text="📊 Статистика", callback_data="menu_stats")
     builder.button(text="💡 Советы", callback_data="menu_tips")
     builder.button(text="🗑️ Очистить данные", callback_data="menu_clear_stats")
-    builder.button(text="❓ Помощь", callback_data="menu_help")  # Новая кнопка Помощь
+    builder.button(text="📣 Обратная связь", callback_data="menu_feedback")
+    builder.button(text="❓ Помощь", callback_data="menu_help")
     if include_settings:
         builder.button(text="⚙️ Настройки", callback_data="menu_settings")
     builder.adjust(1)

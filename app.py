@@ -223,6 +223,12 @@ class TipsSelection(StatesGroup):
     choosing_category = State()
     choosing_tip = State()
 
+class HelpSection(StatesGroup):
+    choosing_section = State()
+
+class Feedback(StatesGroup):
+    waiting_for_message = State()
+
 # Логирование ошибок
 def log_uncaught_exceptions(exctype, value, tb):
     logger.error("Uncaught exception", exc_info=(exctype, value, tb))
@@ -1314,9 +1320,63 @@ async def handle_productivity_answer(message: Message, state: FSMContext):
         logger.error(f"Error in handle_productivity_answer for user_id {message.from_user.id}: {e}")
         await message.answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
 
-# FSM состояние для справки
-class HelpSection(StatesGroup):
-    choosing_section = State()
+@dp.callback_query(lambda c: c.data == "menu_feedback", StateFilter("*"))
+async def start_feedback(callback: CallbackQuery, state: FSMContext):
+    """
+    Начинает процесс сбора обратной связи.
+    """
+    user_id = callback.from_user.id
+    logger.info(f"User {user_id} initiated feedback.")
+    await state.clear() # На случай, если пользователь был в другом состоянии
+    
+    await callback.message.edit_text(
+        "✍️ Пожалуйста, напишите ваше сообщение. Это может быть отчет об ошибке, предложение по улучшению или любой другой отзыв. Я перешлю его администратору.",
+        reply_markup=keyboards.get_cancel_keyboard()
+    )
+    await state.set_state(Feedback.waiting_for_message)
+    await callback.answer()
+
+@dp.message(StateFilter(Feedback.waiting_for_message))
+async def process_feedback(message: Message, state: FSMContext):
+    """
+    Обрабатывает полученное сообщение и пересылает его администратору.
+    """
+    user_id = message.from_user.id
+    logger.info(f"Received feedback from user {user_id}: '{message.text}'")
+    
+    # Проверяем, задан ли ID администратора
+    if not ADMIN_ID:
+        logger.error("ADMIN_ID is not set. Cannot forward feedback.")
+        await message.answer(
+            "К сожалению, функция обратной связи сейчас недоступна. Попробуйте позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+        await state.clear()
+        return
+
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {user_id}"
+    
+    feedback_text = (
+        f"📣 <b>Новое сообщение от пользователя!</b>\n\n"
+        f"<b>От:</b> {user_info}\n"
+        f"<b>ID:</b> <code>{user_id}</code>\n\n"
+        f"<b>Сообщение:</b>\n{message.text}"
+    )
+    
+    try:
+        await bot.send_message(ADMIN_ID, feedback_text)
+        await message.answer(
+            "✅ Спасибо! Ваше сообщение успешно отправлено администратору.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+    except Exception as e:
+        logger.error(f"Failed to send feedback to admin {ADMIN_ID}: {e}")
+        await message.answer(
+            "⚠️ Произошла ошибка при отправке сообщения. Пожалуйста, попробуйте еще раз позже.",
+            reply_markup=keyboards.get_main_menu_keyboard(include_settings=True)
+        )
+    finally:
+        await state.clear()
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message, state: FSMContext):
