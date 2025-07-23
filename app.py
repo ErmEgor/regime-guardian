@@ -1374,6 +1374,28 @@ async def cq_help_menu(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
 
+@dp.callback_query(lambda c: c.data == "help_functionality", StateFilter(HelpSection.choosing_section))
+async def cq_help_functionality(callback: CallbackQuery):
+    logger.info(f"Received callback help_functionality from user_id: {callback.from_user.id}")
+    try:
+        # Здесь вы сможете вписать свой текст
+        help_text = (
+            "🛠️ <b>Общий функционал</b>\n\n"
+            "Здесь будет ваш текст, описывающий общий функционал бота."
+        )
+        await callback.message.edit_text(
+            help_text,
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in help_functionality for user_id {callback.from_user.id}: {e}")
+        await callback.message.edit_text(
+            "⚠️ Ошибка. Попробуйте позже.",
+            reply_markup=keyboards.get_help_menu_keyboard()
+        )
+        await callback.answer()
+
 @dp.callback_query(lambda c: c.data == "help_general", StateFilter(HelpSection.choosing_section))
 async def cq_help_general(callback: CallbackQuery):
     logger.info(f"Received callback help_general from user_id: {callback.from_user.id}")

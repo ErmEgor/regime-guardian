@@ -414,6 +414,7 @@ def get_help_menu_keyboard() -> InlineKeyboardMarkup:
     """
     logger.debug("Creating help menu keyboard")
     buttons = [
+        [InlineKeyboardButton(text="🛠️ Общий функционал", callback_data="help_functionality")],
         [InlineKeyboardButton(text="📖 Общее", callback_data="help_general")],
         [InlineKeyboardButton(text="🏃 Активности", callback_data="help_activities")],
         [InlineKeyboardButton(text="🎯 Цели", callback_data="help_goals")],
