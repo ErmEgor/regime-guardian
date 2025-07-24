@@ -985,19 +985,109 @@ async def cq_cancel_fsm(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("⚠️ Ошибка. Попробуйте позже.")
 
 @dp.message(Command("log"))
-@dp.callback_query(lambda c: c.data == "menu_log_activity")
-async def start_log_activity(update: Message | CallbackQuery, state: FSMContext):
-    user_id = update.from_user.id if isinstance(update, Message) else update.from_user.id
-    logger.info(f"Starting log activity for user_id: {user_id}")
+@dp.callback_query(lambda c: c.data == "menu_free_activity")
+async def cq_free_activity_menu(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    logger.info(f"User {user_id} opened free activity menu.")
     try:
-        message_to_use = update if isinstance(update, Message) else update.message
-        await message_to_use.answer("Выберите тип активности:", reply_markup=keyboards.get_log_activity_type_keyboard())
+        await state.clear()
+        await callback.message.edit_text(
+            "Выберите действие для свободных активностей:",
+            reply_markup=keyboards.get_free_activity_menu_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in cq_free_activity_menu for user_id {user_id}: {e}")
+        await callback.message.answer("⚠️ Ошибка. Попробуйте позже.")
+
+@dp.message(Command("log")) # Оставим команду /log на всякий случай
+@dp.callback_query(lambda c: c.data == "log_activity_start")
+async def cq_start_log_activity(update: Message | CallbackQuery, state: FSMContext):
+    user_id = update.from_user.id
+    logger.info(f"Starting log activity for user_id: {user_id}")
+    message_to_use = update if isinstance(update, Message) else update.message
+    try:
+        await message_to_use.edit_text(
+            "Выберите тип активности для записи:", 
+            reply_markup=keyboards.get_log_activity_type_keyboard()
+        )
         await state.set_state(LogActivity.choosing_type)
         if isinstance(update, CallbackQuery):
             await update.answer()
     except Exception as e:
-        logger.error(f"Error in start_log_activity for user_id {user_id}: {e}")
-        await (update if isinstance(update, Message) else update.message).answer("⚠️ Ошибка. Попробуйте позже.", reply_markup=types.ReplyKeyboardRemove())
+        logger.error(f"Error in cq_start_log_activity for user_id {user_id}: {e}")
+        await message_to_use.answer("⚠️ Ошибка. Попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data == "log_activity_delete_menu")
+async def cq_delete_activity_menu(callback: CallbackQuery, state: FSMContext):
+    """Показывает меню выбора типа активности для удаления."""
+    user_id = callback.from_user.id
+    logger.info(f"User {user_id} wants to delete an activity.")
+    await state.clear()
+    await callback.message.edit_text(
+        "Активности какого типа вы хотите удалить?",
+        reply_markup=keyboards.get_delete_activity_type_keyboard()
+    )
+    await callback.answer()
+
+async def show_activities_for_deletion(callback: CallbackQuery, activity_type: str, page: int = 1):
+    """Вспомогательная функция для отображения списка активностей на удаление."""
+    user_id = callback.from_user.id
+    keyboard = keyboards.get_delete_activity_keyboard(user_id, activity_type, page)
+    
+    type_name = "не полезных" if activity_type == "screen" else "полезных"
+    
+    if keyboard:
+        await callback.message.edit_text(
+            f"Выберите из списка сегодняшних {type_name} активностей для удаления (Стр. {page}):",
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.edit_text(
+            f"У вас нет записанных {type_name} активностей за сегодня.",
+            reply_markup=keyboards.get_delete_activity_type_keyboard()
+        )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_activity_type_"))
+async def cq_delete_activity_type_chosen(callback: CallbackQuery):
+    """Показывает список активностей после выбора типа."""
+    activity_type = callback.data.split('_')[-1]
+    await show_activities_for_deletion(callback, activity_type)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_activity_page_"))
+async def cq_delete_activity_page(callback: CallbackQuery):
+    """Обрабатывает пагинацию в меню удаления."""
+    try:
+        parts = callback.data.split(':')
+        activity_type = parts[0].replace("delete_activity_page_", "")
+        page = int(parts[1])
+        await show_activities_for_deletion(callback, activity_type, page)
+    except Exception as e:
+        logger.error(f"Error in pagination for activity deletion: {e}")
+        await callback.answer("Ошибка пагинации", show_alert=True)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_activity_confirm_"))
+async def cq_delete_activity_confirm(callback: CallbackQuery):
+    """Удаляет выбранную активность и обновляет сообщение."""
+    user_id = callback.from_user.id
+    try:
+        _, _, activity_type, activity_id_str = callback.data.split('_')
+        activity_id = int(activity_id_str)
+
+        if activity_type == "screen":
+            deleted_duration = db.delete_screen_activity(user_id, activity_id)
+            await callback.answer(f"✅ Не полезная активность удалена ({deleted_duration} мин).", show_alert=True)
+        elif activity_type == "productive":
+            db.delete_productive_activity(user_id, activity_id)
+            await callback.answer("✅ Полезная активность удалена.", show_alert=True)
+        
+        # Обновляем список, чтобы удаленный элемент исчез
+        await show_activities_for_deletion(callback, activity_type)
+        
+    except Exception as e:
+        logger.error(f"Error deleting activity: {e}")
+        await callback.answer("⚠️ Ошибка при удалении.", show_alert=True)
 
 @dp.callback_query(lambda c: c.data.startswith("log_type_"), StateFilter(LogActivity.choosing_type))
 async def activity_type_chosen(callback: CallbackQuery, state: FSMContext):

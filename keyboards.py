@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import date
 from sqlalchemy import text
-from db import get_db, get_paginated_achievements, get_paginated_habits, get_paginated_goals
+from db import get_db, get_paginated_achievements, get_paginated_habits, get_paginated_goals, get_paginated_screen_activities_for_today, get_paginated_productive_activities_for_today
 import logging
 import math
 from typing import Optional, List, Dict, Tuple
@@ -17,7 +17,7 @@ def get_main_menu_keyboard(include_settings: bool = False) -> InlineKeyboardMark
     logger.debug("Creating main menu keyboard")
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отметить выполнение", callback_data="menu_mark_done")
-    builder.button(text="✍️ Записать активность", callback_data="menu_log_activity")
+    builder.button(text="✍️ Свободные активности", callback_data="menu_log_activity")
     builder.button(text="🏆 Достижения", callback_data="menu_achievements")
     builder.button(text="📋 Привычки", callback_data="menu_habits")
     builder.button(text="🎯 Цели", callback_data="menu_goals")
@@ -443,3 +443,65 @@ def get_habit_answer_keyboard(habit_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="« Отмена", callback_data="fsm_cancel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_free_activity_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает меню для работы со свободными активностями (записать/удалить).
+    """
+    logger.debug("Creating free activity menu keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="✍️ Записать активность", callback_data="log_activity_start")],
+        [InlineKeyboardButton(text="🗑️ Удалить активность", callback_data="log_activity_delete_menu")],
+        [InlineKeyboardButton(text="« Назад в меню", callback_data="menu_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_activity_type_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора типа удаляемой активности.
+    """
+    logger.debug("Creating delete activity type keyboard")
+    buttons = [
+        [InlineKeyboardButton(text="📱 Не полезная", callback_data="delete_activity_type_screen")],
+        [InlineKeyboardButton(text="💡 Полезная", callback_data="delete_activity_type_productive")],
+        [InlineKeyboardButton(text="« Назад", callback_data="menu_free_activity")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_delete_activity_keyboard(user_id: int, activity_type: str, page: int = 1) -> Optional[InlineKeyboardMarkup]:
+    """
+    Создает пагинированную клавиатуру с активностями для удаления.
+    """
+    logger.debug(f"Creating delete activity keyboard for user {user_id}, type {activity_type}, page {page}")
+    per_page = 5
+    if activity_type == 'screen':
+        activities, total_items = get_paginated_screen_activities_for_today(user_id, page=page, per_page=per_page)
+    elif activity_type == 'productive':
+        activities, total_items = get_paginated_productive_activities_for_today(user_id, page=page, per_page=per_page)
+    else:
+        return None
+
+    if total_items == 0:
+        return None
+
+    builder = InlineKeyboardBuilder()
+
+    for act in activities:
+        builder.button(
+            text=f"❌ {act['name']} ({act['duration']} мин)",
+            callback_data=f"delete_activity_confirm_{activity_type}_{act['id']}"
+        )
+
+    total_pages = math.ceil(total_items / per_page)
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"delete_activity_page_{activity_type}:{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"delete_activity_page_{activity_type}:{page+1}"))
+
+    if nav_buttons:
+        builder.row(*nav_buttons)
+
+    builder.row(InlineKeyboardButton(text="« Назад к выбору типа", callback_data="log_activity_delete_menu"))
+    builder.adjust(1)
+    return builder.as_markup()

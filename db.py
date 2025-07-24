@@ -1107,3 +1107,79 @@ def get_full_user_stats(user_id: int) -> Dict[str, Any]:
             'history_screen_time_map': history_screen_time_map,
             'history_productive_time_map': history_productive_time_map,
         }
+    
+def get_paginated_screen_activities_for_today(user_id: int, page: int = 1, per_page: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+    """Получает пагинированный список сегодняшних 'не полезных' активностей."""
+    offset = (page - 1) * per_page
+    with get_db() as db:
+        stmt_items = text("""
+            SELECT id, activity_name AS name, duration_minutes AS duration 
+            FROM screen_activities 
+            WHERE user_id = :uid AND activity_date = :today 
+            ORDER BY id DESC LIMIT :limit OFFSET :offset
+        """)
+        items = db.execute(stmt_items, {'uid': user_id, 'today': date.today(), 'limit': per_page, 'offset': offset}).fetchall()
+        
+        stmt_total = text("SELECT COUNT(id) FROM screen_activities WHERE user_id = :uid AND activity_date = :today")
+        total = db.execute(stmt_total, {'uid': user_id, 'today': date.today()}).scalar_one()
+        
+        return [{'id': item.id, 'name': item.name, 'duration': item.duration} for item in items], total
+
+def get_paginated_productive_activities_for_today(user_id: int, page: int = 1, per_page: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+    """Получает пагинированный список сегодняшних 'полезных' активностей."""
+    offset = (page - 1) * per_page
+    with get_db() as db:
+        stmt_items = text("""
+            SELECT id, activity_name AS name, duration_minutes AS duration 
+            FROM productive_activities 
+            WHERE user_id = :uid AND activity_date = :today 
+            ORDER BY id DESC LIMIT :limit OFFSET :offset
+        """)
+        items = db.execute(stmt_items, {'uid': user_id, 'today': date.today(), 'limit': per_page, 'offset': offset}).fetchall()
+        
+        stmt_total = text("SELECT COUNT(id) FROM productive_activities WHERE user_id = :uid AND activity_date = :today")
+        total = db.execute(stmt_total, {'uid': user_id, 'today': date.today()}).scalar_one()
+        
+        return [{'id': item.id, 'name': item.name, 'duration': item.duration} for item in items], total
+
+def delete_screen_activity(user_id: int, activity_id: int) -> int:
+    """Удаляет 'не полезную' активность и вычитает ее время из daily_stats."""
+    with get_db() as db:
+        try:
+            # Сначала получаем длительность удаляемой активности
+            stmt_get_duration = text("SELECT duration_minutes FROM screen_activities WHERE id = :aid AND user_id = :uid")
+            duration = db.execute(stmt_get_duration, {'aid': activity_id, 'uid': user_id}).scalar_one_or_none()
+
+            if duration is None:
+                logger.warning(f"Screen activity {activity_id} not found for user {user_id} to delete.")
+                return 0
+
+            # Удаляем саму активность
+            db.execute(text("DELETE FROM screen_activities WHERE id = :aid"), {'aid': activity_id})
+
+            # Обновляем daily_stats
+            stmt_update_total = text("""
+                UPDATE daily_stats 
+                SET screen_time_actual = screen_time_actual - :duration 
+                WHERE user_id = :uid AND stat_date = :today AND screen_time_actual >= :duration
+            """)
+            db.execute(stmt_update_total, {'duration': duration, 'uid': user_id, 'today': date.today()})
+
+            db.commit()
+            logger.info(f"Deleted screen activity {activity_id} ({duration} mins) for user {user_id}")
+            return duration
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error deleting screen activity {activity_id} for user {user_id}: {e}")
+            raise
+
+def delete_productive_activity(user_id: int, activity_id: int):
+    """Удаляет 'полезную' активность."""
+    with get_db() as db:
+        stmt = text("DELETE FROM productive_activities WHERE user_id = :uid AND id = :aid")
+        result = db.execute(stmt, {'uid': user_id, 'aid': activity_id})
+        db.commit()
+        if result.rowcount > 0:
+            logger.info(f"Deleted productive activity {activity_id} for user {user_id}")
+        else:
+            logger.warning(f"No productive activity {activity_id} found for user {user_id} to delete.")
