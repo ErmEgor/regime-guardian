@@ -17,7 +17,7 @@ def get_main_menu_keyboard(include_settings: bool = False) -> InlineKeyboardMark
     logger.debug("Creating main menu keyboard")
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отметить выполнение", callback_data="menu_mark_done")
-    builder.button(text="✍️ Свободные активности", callback_data="menu_log_activity")
+    builder.button(text="✍️ Свободные активности", callback_data="menu_free_activity")
     builder.button(text="🏆 Достижения", callback_data="menu_achievements")
     builder.button(text="📋 Привычки", callback_data="menu_habits")
     builder.button(text="🎯 Цели", callback_data="menu_goals")
