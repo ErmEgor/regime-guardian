@@ -368,22 +368,29 @@ async def cq_add_achievement(callback: CallbackQuery, state: FSMContext):
 async def achievement_date_chosen(message: Message, state: FSMContext):
     try:
         achievement_date = datetime.strptime(message.text.strip(), '%d.%m.%Y').date()
-        await state.update_data(achievement_date=achievement_date)
+        await state.update_data(achievement_date=achievement_date.isoformat())
         await message.answer("Опишите достижение (например, '25 подтягиваний'):", reply_markup=keyboards.get_cancel_keyboard())
         await state.set_state(SportAchievement.choosing_description)
     except ValueError:
         await message.answer("Ошибка. Введите дату в формате ДД.ММ.ГГГГ.", reply_markup=keyboards.get_cancel_keyboard())
+
+# ЗАМЕНИТЬ ЭТОТ ОБРАБОТЧИК
 
 @dp.message(StateFilter(SportAchievement.choosing_description))
 async def achievement_description_chosen(message: Message, state: FSMContext):
     try:
         achievement_name = message.text.strip()
         user_data = await state.get_data()
-        date_earned = user_data.get('achievement_date')
-        if not isinstance(date_earned, date):
+        
+        # ИЗМЕНЕНИЕ: Извлекаем строку и преобразуем обратно в объект date
+        date_earned_str = user_data.get('achievement_date')
+        if not date_earned_str:
             await message.answer("Произошла ошибка с датой. Начните заново.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
+            
+        date_earned = date.fromisoformat(date_earned_str)
+
         db.add_sport_achievement(message.from_user.id, achievement_name, date_earned)
         await state.clear()
         await message.answer(f"🏆 Достижение '{achievement_name}' ({date_earned.strftime('%d.%m.%Y')}) добавлено!", reply_markup=keyboards.get_achievements_menu_keyboard())
